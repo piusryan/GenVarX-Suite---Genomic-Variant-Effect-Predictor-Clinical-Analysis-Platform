@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, Dna } from 'lucide-react';
 
 export default function VariantVisualizer({ variant, vepResult }) {
   const [expanded, setExpanded] = useState(true);
@@ -24,14 +24,14 @@ export default function VariantVisualizer({ variant, vepResult }) {
   const [refAA, altAA] = parseProteinChange(proteinChange);
 
   return (
-    <div className="glass-panel p-6 border-[rgba(0,240,255,0.15)] hud-frame relative neon-glow-cyan">
+    <div className="glass-panel p-6 border-[rgba(148,163,184,0.15)] hud-frame relative">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between mb-4 text-xs font-bold tracking-widest text-cyan-400 font-display hover:text-cyan-300 transition"
+        className="w-full flex items-center justify-between mb-4 text-xs font-bold tracking-widest text-slate-300 font-display hover:text-slate-200 transition"
       >
         <span className="flex items-center gap-2 uppercase">
-          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse-glow"></span>
-          DNA SEQUENCE MAP // MUTATION LOCUS
+          <Dna className="w-4 h-4 text-slate-400" />
+          DNA Sequence Map — Mutation Locus
         </span>
         {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
       </button>
@@ -75,32 +75,32 @@ export default function VariantVisualizer({ variant, vepResult }) {
           </div>
 
           {/* DNA Strand Visualization */}
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
-              <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">
-                Reference Strand Sequence (GRCh38)
+              <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono flex items-center gap-2">
+                <span>Reference Double Helix (GRCh38)</span>
+                <span className="text-[9px] normal-case text-slate-600">— base-pairing shown</span>
               </h4>
               <DNAStrand
                 bases={refStrand}
                 variantPos={context}
                 highlight="ref"
-                refAllele={refAllele}
               />
             </div>
 
             <div className="flex justify-center">
-              <div className="text-sm text-cyan-500/60 font-mono tracking-widest animate-pulse-glow">▼ MATRIX MUTATION POINT ▼</div>
+              <div className="text-xs text-slate-500 font-mono tracking-widest uppercase">▼ Substitution Point ▼</div>
             </div>
 
             <div>
-              <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">
-                Alternate Variant Sequence (Subject)
+              <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono flex items-center gap-2">
+                <span>Alternate Double Helix (Subject)</span>
+                <span className="text-[9px] normal-case text-slate-600">— base-pairing shown</span>
               </h4>
               <DNAStrand
                 bases={altStrand}
                 variantPos={context}
                 highlight="alt"
-                altAllele={altAllele}
               />
             </div>
           </div>
@@ -112,14 +112,14 @@ export default function VariantVisualizer({ variant, vepResult }) {
             </h4>
             <div className="flex items-center justify-center gap-6">
               <div className="text-center font-mono">
-                <div className="text-xl font-bold text-cyan-400 bg-cyan-950/40 px-5 py-2 rounded border border-cyan-500/20 neon-text-cyan">
+                <div className={`text-xl font-bold px-5 py-2 rounded border ${getBaseStyle(refAllele)}`}>
                   {refAllele}
                 </div>
                 <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-1.5">Reference Base</p>
               </div>
               <div className="text-lg text-slate-600 font-bold font-mono">▶</div>
               <div className="text-center font-mono">
-                <div className="text-xl font-bold text-red-400 bg-red-950/40 px-5 py-2 rounded border border-red-500/20 neon-text-red">
+                <div className={`text-xl font-bold px-5 py-2 rounded border ${getBaseStyle(altAllele)}`}>
                   {altAllele}
                 </div>
                 <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-1.5">Variant Base</p>
@@ -164,23 +164,27 @@ export default function VariantVisualizer({ variant, vepResult }) {
 
           {/* Legend */}
           <div className="bg-slate-950/60 border border-slate-900/60 rounded-lg p-3 font-mono text-[9px]">
-            <p className="text-slate-500 font-bold uppercase tracking-widest mb-2">SYSTEM LEGEND:</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <p className="text-slate-500 font-bold uppercase tracking-widest mb-2">Base Colour Legend:</p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 bg-blue-600 rounded-sm"></span>
-                <span className="text-slate-400">Ref Nucleotide</span>
+                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>
+                <span className="text-slate-400">Adenine (A)</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 bg-red-600 rounded-sm"></span>
-                <span className="text-slate-400">Var Nucleotide</span>
+                <span className="w-2.5 h-2.5 rounded-sm bg-red-500"></span>
+                <span className="text-slate-400">Thymine (T)</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 bg-slate-700 rounded-sm"></span>
-                <span className="text-slate-400">Identical Base</span>
+                <span className="w-2.5 h-2.5 rounded-sm bg-amber-400"></span>
+                <span className="text-slate-400">Guanine (G)</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 bg-slate-600 rounded-sm"></span>
-                <span className="text-slate-400">Adjacent Context</span>
+                <span className="w-2.5 h-2.5 rounded-sm bg-blue-500"></span>
+                <span className="text-slate-400">Cytosine (C)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-sm border border-yellow-400"></span>
+                <span className="text-slate-400">Variant Position</span>
               </div>
             </div>
           </div>
@@ -192,40 +196,119 @@ export default function VariantVisualizer({ variant, vepResult }) {
 
 /**
  * DNA Strand Display Component
+ * Renders a double-stranded segment with base-specific colours and pairing lines.
  */
-function DNAStrand({ bases, variantPos, highlight, refAllele, altAllele }) {
+function DNAStrand({ bases, variantPos, highlight }) {
   return (
     <div className="bg-slate-950 border border-slate-800/50 rounded-lg p-4 overflow-x-auto">
-      <div className="flex gap-1 font-mono text-sm justify-center">
-        {bases.map((base, idx) => {
-          const isVariant = idx === variantPos;
-          const isContext = idx > variantPos - 5 && idx < variantPos + 5;
+      <div className="flex flex-col items-center min-w-max">
+        {/* 5' / 3' direction labels */}
+        <div className="flex justify-between w-full text-[10px] text-slate-500 font-mono mb-1 px-1">
+          <span>5′</span>
+          <span>3′</span>
+        </div>
 
-          let bgColor = 'bg-slate-700 text-slate-300';
-          if (isVariant) {
-            bgColor = highlight === 'ref' ? 'bg-blue-600 text-white' : 'bg-red-600 text-white';
-          } else if (isContext) {
-            bgColor = 'bg-slate-600 text-slate-200';
-          }
+        {/* Top strand */}
+        <div className="flex gap-1 font-mono text-sm justify-center">
+          {bases.map((base, idx) => {
+            const isVariant = idx === variantPos;
+            const style = getBaseStyle(base, isVariant);
+            return (
+              <div
+                key={`top-${idx}`}
+                className={`w-8 h-8 flex items-center justify-center rounded font-bold ${style} transition`}
+                title={`Position ${idx}, Base: ${base}`}
+              >
+                {base}
+              </div>
+            );
+          })}
+        </div>
 
-          return (
-            <div
-              key={idx}
-              className={`w-8 h-8 flex items-center justify-center rounded font-bold ${bgColor} transition ${
-                isVariant ? 'ring-2 ring-yellow-400' : ''
-              }`}
-              title={`Position ${idx}, Base: ${base}`}
-            >
-              {base}
-            </div>
-          );
-        })}
+        {/* Hydrogen bond rungs */}
+        <div className="flex gap-1 justify-center py-1">
+          {bases.map((base, idx) => {
+            const isVariant = idx === variantPos;
+            const complement = getComplement(base);
+            const bonds = (base === 'A' || base === 'T') ? 2 : 3;
+            return (
+              <div
+                key={`bond-${idx}`}
+                className={`w-8 flex flex-col items-center justify-center ${isVariant ? 'text-yellow-400' : 'text-slate-600'}`}
+              >
+                <div className="flex flex-col gap-[2px] items-center">
+                  {Array.from({ length: bonds }).map((_, b) => (
+                    <div key={b} className="w-4 h-[1px] bg-current"></div>
+                  ))}
+                </div>
+                <span className="text-[9px] font-bold mt-0.5">{complement}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Bottom strand (complementary) */}
+        <div className="flex gap-1 font-mono text-sm justify-center">
+          {bases.map((base, idx) => {
+            const isVariant = idx === variantPos;
+            const complement = getComplement(base);
+            const style = getBaseStyle(complement, isVariant);
+            return (
+              <div
+                key={`bottom-${idx}`}
+                className={`w-8 h-8 flex items-center justify-center rounded font-bold ${style} transition`}
+                title={`Complement: ${complement}`}
+              >
+                {complement}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex justify-between w-full text-[10px] text-slate-500 font-mono mt-1 px-1">
+          <span>3′</span>
+          <span>5′</span>
+        </div>
       </div>
+
       <div className="text-xs text-slate-500 text-center mt-2">
-        {variantPos > 5 && '← Context →'} Variant position highlighted
+        Variant position highlighted with a yellow ring. A-T pairs have 2 hydrogen bonds; G-C pairs have 3.
       </div>
     </div>
   );
+}
+
+/**
+ * Return Tailwind classes for a base tile.
+ * When isVariant is true, a yellow ring is added instead of recolouring the tile.
+ */
+function getBaseStyle(base, isVariant = false) {
+  const ring = isVariant ? 'ring-2 ring-yellow-400 ring-offset-1 ring-offset-slate-950' : '';
+  switch (base) {
+    case 'A':
+      return `bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 ${ring}`;
+    case 'T':
+      return `bg-red-950/60 text-red-300 border border-red-500/30 ${ring}`;
+    case 'G':
+      return `bg-amber-950/60 text-amber-300 border border-amber-500/30 ${ring}`;
+    case 'C':
+      return `bg-blue-950/60 text-blue-300 border border-blue-500/30 ${ring}`;
+    default:
+      return `bg-slate-700 text-slate-300 border border-slate-600 ${ring}`;
+  }
+}
+
+/**
+ * Return the Watson-Crick complement of a DNA base.
+ */
+function getComplement(base) {
+  switch (base) {
+    case 'A': return 'T';
+    case 'T': return 'A';
+    case 'G': return 'C';
+    case 'C': return 'G';
+    default: return 'N';
+  }
 }
 
 /**
