@@ -1,12 +1,22 @@
 """
 Comprehensive Variant-to-Disease Query Service
 
-Aggregates disease information from multiple external APIs:
-  - Ensembl VEP: Variant effect prediction & rsID resolution
-  - MyVariant.info / ClinVar: Clinical significance & conditions
-  - Ensembl Variation: Gene lookup for direct rsID input
-  - GWAS Catalog (EBI): Trait associations with p-values
-  - NCBI E-utilities (PubMed): Related publications
+Aggregates disease information from BOTH external APIs AND local datasets:
+
+  External APIs:
+    - Ensembl VEP: Variant effect prediction & rsID resolution
+    - MyVariant.info / ClinVar: Clinical significance & conditions
+    - Ensembl Variation: Gene lookup for direct rsID input
+    - GWAS Catalog (EBI): Trait associations with p-values
+    - NCBI E-utilities (PubMed): Related publications
+
+  Local Datasets:
+    - ClinVar VCF (4.4M variants): Clinical significance, disease names, rsIDs
+    - GWAS Catalog TSV (1.18M associations): Trait, p-value, mapped gene
+    - HPO genes_to_phenotype (293K entries): Phenotype terms per gene
+    - disease_names.tsv (67K entries): Disease metadata & concept IDs
+    - clinvar_conflicting.csv (65K entries): Conflicting interpretations
+    - ChEMBL compounds (1K entries): Drug-target associations
 
 Provides a unified, reciprocal search pipeline:
   Variant Coordinate → RSID → Disease Associations
@@ -14,6 +24,8 @@ Provides a unified, reciprocal search pipeline:
 
 import httpx
 import asyncio
+import os
+import pandas as pd
 from typing import Dict, List, Any, Optional
 from app.services.vep_service import fetch_vep_annotation
 from app.services.clinvar_service import fetch_clinvar_data
@@ -26,6 +38,15 @@ NCBI_EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 _HEADERS_JSON = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "GenVarX/1.0"}
 _HEADERS_XML = {"Accept": "application/xml", "User-Agent": "GenVarX/1.0"}
+
+
+# ── Local Dataset Paths ──────────────────────────────────────────────
+_LOCAL_CLINVAR_VCF = "data/datasets/clinvar/clinvar.vcf"
+_LOCAL_GWAS_TSV = "data/datasets/clinvar/gwas-catalog-download-associations-v1.0-full.tsv"
+_LOCAL_HPO_CSV = "data/datasets/hpo/genes_to_phenotype.csv"
+_LOCAL_DISEASE_TSV = "data/datasets/clinvar/disease_names.tsv"
+_LOCAL_CLINVAR_CONFLICT = "data/datasets/clinvar/clinvar_conflicting.csv"
+_LOCAL_CHEMBL_CSV = "data/datasets/chembl/chembl_compounds.csv"
 
 
 # ── Ensembl Variation Lookup (rsID → gene & variant details) ──────────
@@ -233,6 +254,285 @@ async def _gene_summary(gene_symbol: str) -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  LOCAL DATASET SEARCH FUNCTIONS
+# ══════════════════════════════════════════════════════════════════════
+
+async def _local_clinvar_vcf_search(variant_input: str, is_rsid: bool) -> Dict[str, Any]:
+    """
+    Search local ClinVar VCF (4.4M variants) by coordinates or RSID.
+    Returns clinical significance, disease names, gene, rsID.
+    """
+    results = []
+    rsid_found = None
+    clinical_sig = None
+    gene_symbol = None
+    
+    if not os.path.exists(_LOCAL_CLINVAR_VCF):
+        return {"hits": [], "rsid": None, "clinical_significance": None, "gene": None, "found": False}
+    
+    try:
+        parts = variant_input.split(':') if not is_rsid else []
+        search_chrom = parts[0] if len(parts) >= 2 else None
+        search_pos = parts[1] if len(parts) >= 2 else None
+        
+        with open(_LOCAL_CLINVAR_VCF, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                
+                vparts = line.strip().split('\t')
+                if len(vparts) < 8:
+                    continue
+                
+                matched = False
+                
+                if is_rsid:
+                    # Match by RSID in the ID column
+                    variant_ids = vparts[2].split(';')
+                    if variant_input.lower() in [vid.lower() for vid in variant_ids]:
+                        matched = True
+                else:
+                    # Match by chromosome + position
+                    chrom = vparts[0].replace('chr', '')
+                    pos = vparts[1]
+                    if chrom == search_chrom and pos == search_pos:
+                        matched = True
+                
+                if matched:
+                    info = vparts[7]
+                    info_dict = {}
+                    for item in info.split(';'):
+                        if '=' in item:
+                            k, v = item.split('=', 1)
+                            info_dict[k] = v
+                    
+                    disease = info_dict.get('CLNDN', '')
+                    clin_sig = info_dict.get('CLNSIG', '')
+                    gene = info_dict.get('SYMBOL', '')
+                    consequence = info_dict.get('Consequence', '')
+                    impact_val = info_dict.get('IMPACT', '')
+                    rsid_val = vparts[2] if vparts[2].startswith('rs') else ''
+                    
+                    if disease and disease != 'not_provided' and disease != 'not_specified':
+                        results.append({
+                            "disease": disease.replace('_', ' '),
+                            "clinical_significance": clin_sig.replace('_', ' ') if clin_sig else '',
+                            "gene": gene,
+                            "rsid": rsid_val,
+                            "consequence": consequence,
+                            "impact": impact_val,
+                            "source": "ClinVar VCF (Local)",
+                        })
+                    
+                    if rsid_val and not rsid_found:
+                        rsid_found = rsid_val
+                    if clin_sig and not clinical_sig:
+                        clinical_sig = clin_sig.replace('_', ' ')
+                    if gene and not gene_symbol:
+                        gene_symbol = gene
+    except Exception as e:
+        print(f"[DISEASE-LOCAL] ClinVar VCF search error: {e}")
+    
+    return {
+        "hits": results[:30],
+        "rsid": rsid_found,
+        "clinical_significance": clinical_sig,
+        "gene": gene_symbol,
+        "found": len(results) > 0,
+    }
+
+
+async def _local_gwas_tsv_search(rsid: str) -> Dict[str, Any]:
+    """
+    Search local GWAS Catalog TSV (1.18M associations) by RSID.
+    Reads the FULL file (not just first 10K rows).
+    """
+    if not rsid or not os.path.exists(_LOCAL_GWAS_TSV):
+        return {"hits": [], "found": False}
+    
+    try:
+        # Actual column names: SNPS, DISEASE/TRAIT, P-VALUE, MAPPED_GENE, CHR_ID, CHR_POS,
+        # STRONGEST SNP-RISK ALLELE, STUDY, PUBMEDID, OR or BETA, RISK ALLELE FREQUENCY
+        df = pd.read_csv(_LOCAL_GWAS_TSV, sep='\t', low_memory=False,
+                         usecols=['SNPS', 'DISEASE/TRAIT', 'P-VALUE', 'MAPPED_GENE',
+                                  'CHR_ID', 'CHR_POS', 'STRONGEST SNP-RISK ALLELE', 'STUDY',
+                                  'PUBMEDID', 'OR or BETA', 'RISK ALLELE FREQUENCY'])
+        
+        matches = df[df['SNPS'].astype(str).str.contains(rsid, na=False, case=False)]
+        
+        results = []
+        for _, row in matches.iterrows():
+            results.append({
+                "disease": str(row.get('DISEASE/TRAIT', 'Unknown')),
+                "pvalue": str(row.get('P-VALUE', 'N/A')),
+                "gene": str(row.get('MAPPED_GENE', '')),
+                "risk_allele": str(row.get('STRONGEST SNP-RISK ALLELE', '')),
+                "study_id": str(row.get('STUDY', ''))[:60],
+                "pubmed_id": str(row.get('PUBMEDID', '')),
+                "or_value": str(row.get('OR or BETA', '')),
+                "risk_frequency": str(row.get('RISK ALLELE FREQUENCY', '')),
+                "source": "GWAS Catalog TSV (Local)",
+            })
+        
+        return {"hits": results[:50], "found": len(results) > 0}
+    except Exception as e:
+        print(f"[DISEASE-LOCAL] GWAS TSV search error: {e}")
+        return {"hits": [], "found": False}
+
+
+async def _local_hpo_search(gene_symbol: str) -> Dict[str, Any]:
+    """
+    Search local HPO genes_to_phenotype.csv (293K entries) by gene symbol.
+    Returns phenotype terms, HPO IDs, frequencies, disease IDs.
+    """
+    if not gene_symbol or not os.path.exists(_LOCAL_HPO_CSV):
+        return {"phenotypes": [], "found": False}
+    
+    try:
+        df = pd.read_csv(_LOCAL_HPO_CSV, low_memory=False)
+        
+        if 'gene_symbol' not in df.columns:
+            return {"phenotypes": [], "found": False}
+        
+        matches = df[df['gene_symbol'].str.upper() == gene_symbol.upper()]
+        
+        phenotypes = []
+        seen = set()
+        for _, row in matches.iterrows():
+            hpo_id = str(row.get('hpo_id', ''))
+            if hpo_id not in seen and hpo_id != 'nan':
+                seen.add(hpo_id)
+                phenotypes.append({
+                    "hpo_id": hpo_id,
+                    "phenotype": str(row.get('hpo_name', '')),
+                    "frequency": str(row.get('frequency', '')),
+                    "disease_id": str(row.get('disease_id', '')),
+                })
+        
+        return {"phenotypes": phenotypes[:30], "found": len(phenotypes) > 0}
+    except Exception as e:
+        print(f"[DISEASE-LOCAL] HPO search error: {e}")
+        return {"phenotypes": [], "found": False}
+
+
+async def _local_disease_names_lookup(disease_terms: List[str]) -> Dict[str, Any]:
+    """
+    Look up disease metadata from disease_names.tsv (67K entries).
+    Returns concept IDs, sources, categories for matched diseases.
+    """
+    if not disease_terms or not os.path.exists(_LOCAL_DISEASE_TSV):
+        return {"metadata": {}, "found": False}
+    
+    try:
+        # Column name starts with '#' → read and strip it
+        df = pd.read_csv(_LOCAL_DISEASE_TSV, sep='\t', low_memory=False)
+        # Fix column names: #DiseaseName → DiseaseName
+        df.columns = [c.lstrip('#') for c in df.columns]
+        
+        metadata = {}
+        for term in disease_terms:
+            if not term or len(term) < 3:
+                continue
+            term_lower = term.lower()
+            if 'DiseaseName' in df.columns:
+                matches = df[df['DiseaseName'].str.lower().str.contains(term_lower, na=False, regex=False)]
+            else:
+                # Fallback: search all string columns
+                matches = pd.DataFrame()
+                for col in df.columns:
+                    if df[col].dtype == object:
+                        m = df[df[col].str.lower().str.contains(term_lower, na=False, regex=False)]
+                        if len(m) > 0:
+                            matches = pd.concat([matches, m]).drop_duplicates()
+            
+            if len(matches) > 0:
+                row = matches.iloc[0]
+                metadata[term] = {
+                    "official_name": str(row.get('DiseaseName', row.iloc[0] if len(row) > 0 else '')),
+                    "concept_id": str(row.get('ConceptID', '')),
+                    "source": str(row.get('SourceName', '')),
+                    "category": str(row.get('Category', '')),
+                    "disease_mim": str(row.get('DiseaseMIM', '')),
+                }
+        
+        return {"metadata": metadata, "found": len(metadata) > 0}
+    except Exception as e:
+        print(f"[DISEASE-LOCAL] Disease names lookup error: {e}")
+        return {"metadata": {}, "found": False}
+
+
+async def _local_clinvar_conflicting_search(variant_input: str, is_rsid: bool) -> Dict[str, Any]:
+    """
+    Search clinvar_conflicting.csv (65K entries) for conflicting clinical interpretations.
+    """
+    if not os.path.exists(_LOCAL_CLINVAR_CONFLICT):
+        return {"hits": [], "found": False}
+    
+    try:
+        df = pd.read_csv(_LOCAL_CLINVAR_CONFLICT, low_memory=False)
+        
+        matches = pd.DataFrame()
+        if is_rsid:
+            # Search by rsID in any column that might contain it
+            for col in df.columns:
+                if df[col].dtype == object:
+                    col_matches = df[df[col].astype(str).str.contains(variant_input, na=False, case=False)]
+                    if len(col_matches) > 0:
+                        matches = pd.concat([matches, col_matches]).drop_duplicates()
+        else:
+            parts = variant_input.split(':')
+            if len(parts) >= 2:
+                for col in df.columns:
+                    if df[col].dtype == object:
+                        col_matches = df[df[col].astype(str).str.contains(parts[1], na=False, case=False)]
+                        if len(col_matches) > 0:
+                            matches = pd.concat([matches, col_matches]).drop_duplicates()
+        
+        results = []
+        for _, row in matches.head(10).iterrows():
+            results.append({
+                "data": {str(k): str(v) for k, v in row.items() if pd.notna(v) and str(v).strip()},
+                "source": "ClinVar Conflicting (Local)",
+            })
+        
+        return {"hits": results, "found": len(results) > 0}
+    except Exception as e:
+        print(f"[DISEASE-LOCAL] ClinVar conflicting search error: {e}")
+        return {"hits": [], "found": False}
+
+
+async def _local_chembl_search(gene_symbol: str) -> Dict[str, Any]:
+    """
+    Search ChEMBL compounds targeting the given gene (for drug-gene links).
+    """
+    if not gene_symbol or not os.path.exists(_LOCAL_CHEMBL_CSV):
+        return {"compounds": [], "found": False}
+    
+    try:
+        df = pd.read_csv(_LOCAL_CHEMBL_CSV, sep=';', low_memory=False, encoding='utf-8', on_bad_lines='skip')
+        
+        # Search in Targets column for gene symbol
+        matches = pd.DataFrame()
+        if 'Targets' in df.columns:
+            matches = df[df['Targets'].astype(str).str.contains(gene_symbol, na=False, case=False)]
+        
+        results = []
+        for _, row in matches.head(10).iterrows():
+            results.append({
+                "name": str(row.get('Name', '')),
+                "chembl_id": str(row.get('Compound ChEMBL ID', '')),
+                "max_phase": str(row.get('Max Phase', '')),
+                "molecular_weight": str(row.get('Molecular Weight', '')),
+                "type": str(row.get('Type', '')),
+            })
+        
+        return {"compounds": results, "found": len(results) > 0}
+    except Exception as e:
+        print(f"[DISEASE-LOCAL] ChEMBL search error: {e}")
+        return {"compounds": [], "found": False}
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  MAIN AGGREGATOR
 # ══════════════════════════════════════════════════════════════════════
 async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
@@ -279,7 +579,7 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
         except Exception as e:
             print(f"[DISEASE] VEP error: {e}")
 
-    # ── Phase 2: Parallel API calls ────────────────────────────────
+    # ── Phase 2: Parallel API calls (EXTERNAL + LOCAL) ────────────
     clinvar_in = variant_input if not is_rsid else f"{variant_input}:N:N:N"
     ensembl_rsid = resolved_rsid or (variant_input if is_rsid else None)
     gwas_rsid = resolved_rsid or (variant_input if is_rsid else None)
@@ -290,6 +590,14 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
     publications = []
     gene_info = {}
 
+    # --- LOCAL DATASET SEARCHES (run in parallel with external APIs) ---
+    local_clinvar = {"hits": [], "rsid": None, "clinical_significance": None, "gene": None, "found": False}
+    local_gwas = {"hits": [], "found": False}
+    local_hpo = {"phenotypes": [], "found": False}
+    local_disease_meta = {"metadata": {}, "found": False}
+    local_conflicting = {"hits": [], "found": False}
+    local_chembl = {"compounds": [], "found": False}
+
     # Only call APIs that have valid input
     tasks = {}
     if not is_rsid:
@@ -298,6 +606,12 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
         tasks["ensembl"] = _ensembl_variation(ensembl_rsid)
     if gwas_rsid:
         tasks["gwas"] = _gwas_data(gwas_rsid)
+
+    # Local dataset searches (run alongside external APIs)
+    tasks["local_clinvar"] = _local_clinvar_vcf_search(variant_input, is_rsid)
+    if gwas_rsid:
+        tasks["local_gwas"] = _local_gwas_tsv_search(gwas_rsid)
+    tasks["local_conflicting"] = _local_clinvar_conflicting_search(variant_input, is_rsid)
 
     if tasks:
         keys = list(tasks.keys())
@@ -316,37 +630,128 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
         if isinstance(gwas_res, Exception):
             gwas_res = {"associations": [], "found": False}
 
+        # Collect local results
+        local_clinvar = result_map.get("local_clinvar", local_clinvar)
+        if isinstance(local_clinvar, Exception):
+            local_clinvar = {"hits": [], "rsid": None, "clinical_significance": None, "gene": None, "found": False}
+
+        local_gwas = result_map.get("local_gwas", local_gwas)
+        if isinstance(local_gwas, Exception):
+            local_gwas = {"hits": [], "found": False}
+
+        local_conflicting = result_map.get("local_conflicting", local_conflicting)
+        if isinstance(local_conflicting, Exception):
+            local_conflicting = {"hits": [], "found": False}
+
+    # Resolve rsID from local ClinVar if external didn't provide one
+    if not resolved_rsid and local_clinvar.get("rsid"):
+        resolved_rsid = local_clinvar["rsid"]
+
+    # Resolve gene from local ClinVar if external didn't provide one
+    if (not gene_symbol or gene_symbol == "N/A") and local_clinvar.get("gene"):
+        gene_symbol = local_clinvar["gene"]
+
+    # Resolve clinical significance from local if external failed
+    if (not clinvar_res.get("clinical_significance") or clinvar_res.get("clinical_significance") == "Not Available") and local_clinvar.get("clinical_significance"):
+        clinvar_res["clinical_significance"] = local_clinvar["clinical_significance"]
+
+    # If we now have an rsID from local, search GWAS local TSV
+    if resolved_rsid and not local_gwas.get("found"):
+        try:
+            local_gwas = await _local_gwas_tsv_search(resolved_rsid)
+        except Exception:
+            pass
+
     # Resolve gene from Ensembl if VEP didn't provide one
     if (not gene_symbol or gene_symbol == "N/A") and ensembl_res.get("gene"):
         gene_symbol = ensembl_res["gene"]
     if (not consequence or consequence == "N/A") and ensembl_res.get("consequence"):
         consequence = ensembl_res["consequence"]
 
-    # Fetch gene details and publications (depend on gene_symbol)
+    # Run HPO + ChEMBL + disease_names lookup (depend on gene_symbol or disease terms)
+    hpo_task = _local_hpo_search(gene_symbol) if gene_symbol and gene_symbol != "N/A" else None
+    chembl_task = _local_chembl_search(gene_symbol) if gene_symbol and gene_symbol != "N/A" else None
+
+    # Collect disease terms for disease_names lookup
+    disease_terms_for_meta = []
+    for d in clinvar_res.get("diseases", []):
+        disease_terms_for_meta.append(d.get("disease", ""))
+    for h in local_clinvar.get("hits", []):
+        disease_terms_for_meta.append(h.get("disease", ""))
+    for h in local_gwas.get("hits", []):
+        disease_terms_for_meta.append(h.get("disease", ""))
+    disease_terms_for_meta = [t for t in disease_terms_for_meta if t and len(t) > 2][:10]
+    
+    disease_meta_task = _local_disease_names_lookup(disease_terms_for_meta) if disease_terms_for_meta else None
+
+    secondary_tasks = {}
+    if hpo_task:
+        secondary_tasks["hpo"] = hpo_task
+    if chembl_task:
+        secondary_tasks["chembl"] = chembl_task
+    if disease_meta_task:
+        secondary_tasks["disease_meta"] = disease_meta_task
     if gene_symbol and gene_symbol != "N/A":
-        try:
-            gene_info = await _gene_summary(gene_symbol)
-        except Exception:
+        secondary_tasks["gene_info"] = _gene_summary(gene_symbol)
+
+    if secondary_tasks:
+        sec_keys = list(secondary_tasks.keys())
+        sec_results = await asyncio.gather(*secondary_tasks.values(), return_exceptions=True)
+        sec_map = dict(zip(sec_keys, sec_results))
+
+        local_hpo = sec_map.get("hpo", local_hpo)
+        if isinstance(local_hpo, Exception):
+            local_hpo = {"phenotypes": [], "found": False}
+
+        local_chembl = sec_map.get("chembl", local_chembl)
+        if isinstance(local_chembl, Exception):
+            local_chembl = {"compounds": [], "found": False}
+
+        local_disease_meta = sec_map.get("disease_meta", local_disease_meta)
+        if isinstance(local_disease_meta, Exception):
+            local_disease_meta = {"metadata": {}, "found": False}
+
+        gene_info = sec_map.get("gene_info", gene_info)
+        if isinstance(gene_info, Exception):
             gene_info = {"symbol": gene_symbol}
 
-        disease_terms = [a["disease"] for a in gwas_res.get("associations", [])[:3]]
+    # Fetch publications (depends on gene_symbol + disease terms)
+    if gene_symbol and gene_symbol != "N/A":
+        all_disease_terms = [a.get("disease", "") for a in gwas_res.get("associations", [])[:3]]
+        all_disease_terms += [h.get("disease", "") for h in local_gwas.get("hits", [])[:3]]
+        all_disease_terms = [t for t in all_disease_terms if t][:3]
         try:
-            publications = await _pubmed_search(gene_symbol, disease_terms)
+            publications = await _pubmed_search(gene_symbol, all_disease_terms)
         except Exception:
             publications = []
 
-    # ── Phase 3: Aggregate results ─────────────────────────────────
+    # ── Phase 3: Aggregate ALL results (external + local) ─────────
     disease_associations = []
     seen = set()
 
-    # ClinVar diseases
+    # 1. External ClinVar diseases
     for d in clinvar_res.get("diseases", []):
         key = d["disease"].lower().strip()
         if key not in seen:
             seen.add(key)
             disease_associations.append(d)
 
-    # GWAS diseases
+    # 2. Local ClinVar VCF diseases
+    for h in local_clinvar.get("hits", []):
+        key = h["disease"].lower().strip()
+        if key not in seen:
+            seen.add(key)
+            disease_associations.append({
+                "disease": h["disease"],
+                "clinical_significance": h.get("clinical_significance", ""),
+                "gene": h.get("gene", ""),
+                "rsid": h.get("rsid", ""),
+                "consequence": h.get("consequence", ""),
+                "impact": h.get("impact", ""),
+                "source": "ClinVar VCF (Local)",
+            })
+
+    # 3. External GWAS diseases
     for a in gwas_res.get("associations", []):
         key = a["disease"].lower().strip()
         if key not in seen:
@@ -360,6 +765,34 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
                 "risk_allele": a.get("risk_allele"),
                 "source": "GWAS Catalog",
             })
+
+    # 4. Local GWAS TSV diseases
+    for h in local_gwas.get("hits", []):
+        key = h["disease"].lower().strip()
+        if key not in seen:
+            seen.add(key)
+            disease_associations.append({
+                "disease": h["disease"],
+                "pvalue": h.get("pvalue"),
+                "gene": h.get("gene"),
+                "study_id": h.get("study_id"),
+                "pubmed_id": h.get("pubmed_id"),
+                "risk_allele": h.get("risk_allele"),
+                "or_value": h.get("or_value"),
+                "risk_frequency": h.get("risk_frequency"),
+                "source": "GWAS Catalog TSV (Local)",
+            })
+
+    # Build local dataset stats
+    local_dataset_stats = {
+        "clinvar_vcf": {"used": local_clinvar.get("found", False), "hits": len(local_clinvar.get("hits", []))},
+        "gwas_tsv": {"used": local_gwas.get("found", False), "hits": len(local_gwas.get("hits", []))},
+        "hpo_phenotypes": {"used": local_hpo.get("found", False), "hits": len(local_hpo.get("phenotypes", []))},
+        "disease_names": {"used": local_disease_meta.get("found", False), "matches": len(local_disease_meta.get("metadata", {}))},
+        "clinvar_conflicting": {"used": local_conflicting.get("found", False), "hits": len(local_conflicting.get("hits", []))},
+        "chembl_compounds": {"used": local_chembl.get("found", False), "hits": len(local_chembl.get("compounds", []))},
+    }
+    local_total = sum(v["hits"] if "hits" in v else v.get("matches", 0) for v in local_dataset_stats.values())
 
     return {
         "variant_input": variant_input,
@@ -378,12 +811,22 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
         },
         "clinical_significance": clinvar_res.get("clinical_significance") or "Not Available",
         "disease_associations": disease_associations,
-        "gwas_findings": gwas_res.get("associations", []),
+        "gwas_findings": gwas_res.get("associations", []) + local_gwas.get("hits", []),
+        "hpo_phenotypes": local_hpo.get("phenotypes", []),
+        "disease_metadata": local_disease_meta.get("metadata", {}),
+        "clinvar_conflicting": local_conflicting.get("hits", []),
+        "chembl_compounds": local_chembl.get("compounds", []),
         "publications": publications,
+        "local_dataset_stats": local_dataset_stats,
+        "local_datasets_total_hits": local_total,
         "source_counts": {
             "clinvar_conditions": len(clinvar_res.get("diseases", [])),
+            "clinvar_vcf_local": len(local_clinvar.get("hits", [])),
             "gwas_traits": len(gwas_res.get("associations", [])),
+            "gwas_tsv_local": len(local_gwas.get("hits", [])),
+            "hpo_phenotypes": len(local_hpo.get("phenotypes", [])),
             "publications": len(publications),
             "total_associations": len(disease_associations),
+            "local_datasets_used": sum(1 for v in local_dataset_stats.values() if v.get("used", False)),
         },
     }

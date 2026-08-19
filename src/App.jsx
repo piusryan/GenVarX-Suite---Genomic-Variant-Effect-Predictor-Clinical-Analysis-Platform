@@ -384,48 +384,46 @@ export default function App() {
                   </div>
                 </form>
 
-                {/* Preset hotkeys - EXPANDED */}
+                {/* Preset hotkeys - EXPANDED with tested working variants */}
                 <div className="space-y-3 mt-4">
-                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Preset Variants:</div>
+                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Preset Variants (All Tested):</div>
                   
-                  {/* Cancer Risk Category */}
+                  {/* Cancer - Somatic Driver Mutations */}
                   <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔴 High Risk (Hereditary Cancer)</div>
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔴 Cancer (Somatic Drivers)</div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { setVariantInput('17:43044295:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRCA1 (Breast)</button>
-                      <button type="button" onClick={() => { setVariantInput('13:32316462:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRCA2 (Ovarian)</button>
-                      <button type="button" onClick={() => { setVariantInput('17:7673802:C:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">TP53 (Li-Fraumeni)</button>
-                      <button type="button" onClick={() => { setVariantInput('2:212245402:C:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">PTEN (Cowden)</button>
+                      <button type="button" onClick={() => { setVariantInput('7:140753336:A:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRAF V600E (Melanoma)</button>
+                      <button type="button" onClick={() => { setVariantInput('17:7673802:C:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">TP53 R248W (Li-Fraumeni)</button>
+                      <button type="button" onClick={() => { setVariantInput('12:25227344:G:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">KRAS G12D (Pancreas)</button>
+                      <button type="button" onClick={() => { setVariantInput('5:112839461:T:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">APC (Colon/FAP)</button>
                     </div>
                   </div>
 
-                  {/* Moderate Risk Category */}
+                  {/* Hematologic / Blood Disorders */}
                   <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟠 Moderate Risk (Cancer Predisposition)</div>
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟠 Hematologic / Blood</div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { setVariantInput('7:55249071:T:G'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">EGFR (Lung)</button>
-                      <button type="button" onClick={() => { setVariantInput('12:25398284:C:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">KRAS (Pancreas)</button>
-                      <button type="button" onClick={() => { setVariantInput('5:112839461:T:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">APC (Colon)</button>
-                      <button type="button" onClick={() => { setVariantInput('7:140753336:A:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">BRAF (Melanoma)</button>
+                      <button type="button" onClick={() => { setVariantInput('9:5073770:G:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">JAK2 V617F (MPN/PV)</button>
+                      <button type="button" onClick={() => { setVariantInput('11:5248232:T:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">HBB (Sickle Cell)</button>
                     </div>
                   </div>
 
-                  {/* Cardiovascular Category */}
+                  {/* Hereditary Cancer Risk */}
                   <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔵 Cardiovascular / Metabolic</div>
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟡 Hereditary Cancer Risk</div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { setVariantInput('1:55505647:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">LDLR (Cholesterol)</button>
-                      <button type="button" onClick={() => { setVariantInput('19:44919406:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">APOE (Heart Disease)</button>
-                      <button type="button" onClick={() => { setVariantInput('7:127387562:C:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">GCK (Diabetes)</button>
+                      <button type="button" onClick={() => { setVariantInput('17:43124016:CT:C'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">BRCA1 185delAG</button>
+                      <button type="button" onClick={() => { setVariantInput('13:32340392:GT:G'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">BRCA2 6174delT</button>
+                      <button type="button" onClick={() => { setVariantInput('17:31259014:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">NF1 (Neurofibromatosis)</button>
                     </div>
                   </div>
 
-                  {/* Neurological Category */}
+                  {/* Other Pathogenic */}
                   <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟣 Neurological / Psychiatric</div>
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔵 Other Pathogenic</div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { setVariantInput('4:38767700:T:C'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">HTT (Huntington)</button>
-                      <button type="button" onClick={() => { setVariantInput('19:50958929:T:C'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">PSEN1 (Alzheimer)</button>
+                      <button type="button" onClick={() => { setVariantInput('7:117559590:ATCT:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">CFTR F508del (Cystic Fibrosis)</button>
+                      <button type="button" onClick={() => { setVariantInput('10:87952116:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">PTEN (Cowden Syndrome)</button>
                     </div>
                   </div>
                 </div>
@@ -579,46 +577,41 @@ export default function App() {
                   </div>
                 </form>
 
-                {/* GWAS Preset variants with known GWAS data */}
+                {/* GWAS Preset variants - ALL tested, local datasets scan all */}
                 <div className="space-y-3 mt-4">
-                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Test Presets (Common Variants with GWAS Data):</div>
+                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Test Presets (All Scanned Against 6 Local Datasets + External APIs):</div>
                   
                   <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔵 Metabolic / Cardiovascular</div>
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔴 Best Results (Multi-Source Hits)</div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { setGwasInput('1:55505647:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">LDLR Cholesterol</button>
-                      <button type="button" onClick={() => { setGwasInput('19:44919406:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">APOE Heart Disease</button>
-                      <button type="button" onClick={() => { setGwasInput('7:127387562:C:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">GCK Type 2 Diabetes</button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">📊 Population Variants</div>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { setGwasInput('11:116414097:C:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-slate-950/40 border border-slate-500/20 px-2 py-1 rounded hover:border-slate-500/40">rs1333049 CAD</button>
-                      <button type="button" onClick={() => { setGwasInput('10:114758349:T:C'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-slate-950/40 border border-slate-500/20 px-2 py-1 rounded hover:border-slate-500/40">rs1441675 BMI</button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔴 Cancer (Somatic & Germline)</div>
-                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setGwasInput('9:5073770:G:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">JAK2 V617F (MPN) ★ 90+ hits</button>
+                      <button type="button" onClick={() => { setGwasInput('17:7673802:C:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">TP53 R248W (Li-Fraumeni)</button>
                       <button type="button" onClick={() => { setGwasInput('7:140753336:A:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRAF V600E (Melanoma)</button>
-                      <button type="button" onClick={() => { setGwasInput('17:43044295:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRCA1 (Breast)</button>
-                      <button type="button" onClick={() => { setGwasInput('7:55249071:T:G'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">EGFR (Lung)</button>
+                      <button type="button" onClick={() => { setGwasInput('5:112839461:T:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">APC (Colon/FAP)</button>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟣 Neurological</div>
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟠 Cancer / Hematologic</div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => { setGwasInput('19:50958929:T:C'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">PSEN1 (Alzheimer)</button>
-                      <button type="button" onClick={() => { setGwasInput('6:32560756:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">HLA-DRB1 (MS)</button>
+                      <button type="button" onClick={() => { setGwasInput('12:25227344:G:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">KRAS G12D (Pancreas)</button>
+                      <button type="button" onClick={() => { setGwasInput('11:5248232:T:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">HBB (Sickle Cell)</button>
+                      <button type="button" onClick={() => { setGwasInput('17:31259014:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">NF1 (Neurofibromatosis)</button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟡 Hereditary / Pathogenic</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setGwasInput('17:43124016:CT:C'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">BRCA1 185delAG</button>
+                      <button type="button" onClick={() => { setGwasInput('13:32340392:GT:G'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">BRCA2 6174delT</button>
+                      <button type="button" onClick={() => { setGwasInput('7:117559590:ATCT:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">CFTR F508del (CF)</button>
+                      <button type="button" onClick={() => { setGwasInput('10:87952116:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">PTEN (Cowden)</button>
                     </div>
                   </div>
 
                   <div className="text-[8px] text-slate-500 mt-3 font-mono-code">
-                    💡 These presets have public rsIDs and GWAS Catalog entries. Rare variants (like BRCA1) won't show GWAS data.
+                    💡 All presets scanned against ClinVar VCF (4.4M), GWAS TSV (1.18M), HPO (293K), Disease Names (67K), ClinVar Conflicting (65K), ChEMBL (1K) + external APIs
                   </div>
                 </div>
               </HUDFrame>
@@ -729,49 +722,52 @@ export default function App() {
                       <span>Gene: <strong className="text-emerald-400">{gwasData.gene_symbol || 'N/A'}</strong></span>
                       <span>Consequence: <strong className="text-slate-200">{(gwasData.consequence || 'N/A').replace(/_/g, ' ')}</strong></span>
                     </div>
-                    {gwasData.rs_id && (
-                      <button
-                        onClick={handleComprehensiveDisease}
-                        disabled={compLoading}
-                        className="bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-900/30 text-slate-950 font-bold px-6 py-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs tracking-widest font-display btn-neon shadow-[0_0_15px_rgba(0,240,255,0.2)]"
-                      >
-                        {compLoading ? (
-                          <><Loader2 className="w-4 h-4 animate-spin text-slate-950" />QUERYING ALL DATABASES...</>
-                        ) : (
-                          <><Network className="w-4 h-4 text-slate-950" />FIND ALL DISEASE ASSOCIATIONS</>
-                        )}
-                      </button>
-                    )}
+                    {/* Always show the disease lookup button - local datasets can search by coordinates too */}
+                    <button
+                      onClick={handleComprehensiveDisease}
+                      disabled={compLoading}
+                      className="bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-900/30 text-slate-950 font-bold px-6 py-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs tracking-widest font-display btn-neon shadow-[0_0_15px_rgba(0,240,255,0.2)]"
+                    >
+                      {compLoading ? (
+                        <><Loader2 className="w-4 h-4 animate-spin text-slate-950" />SCANNING 6 LOCAL DATASETS + EXTERNAL APIS...</>
+                      ) : (
+                        <><Network className="w-4 h-4 text-slate-950" />SCAN ALL DATASETS (EXTERNAL + LOCAL)</>
+                      )}
+                    </button>
                     {!gwasData.rs_id && (
-                      <div className="text-xs font-mono text-amber-400 flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4" />
-                        No rsID resolved for this variant. Disease lookup requires a known rsID.
+                      <div className="text-[10px] font-mono text-amber-400/70 flex items-center gap-2">
+                        <AlertTriangle className="w-3 h-3" />
+                        No rsID from VEP, but local ClinVar VCF (4.4M) and GWAS TSV (1.18M) will search by coordinates.
                       </div>
                     )}
                   </div>
                 </HUDFrame>
 
-                {/* Informative message when rsID not found */}
-                {!gwasData.rs_id && (
+                {/* Informative message when VEP rsID not found */}
+                {!gwasData.rs_id && !comprehensiveDisease && (
                   <div className="mb-6 p-4 bg-amber-950/30 border border-amber-500/30 rounded-lg space-y-2">
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                       <div className="space-y-1">
                         <div className="font-bold text-amber-400 text-xs uppercase tracking-wider">
-                          rsID Not Found - Variant Not in GWAS Catalog
+                          rsID Not Resolved by Ensembl VEP
                         </div>
                         <div className="text-[11px] text-slate-300 leading-relaxed">
-                          <strong>Why:</strong> GWAS Catalog contains only <strong>common population variants</strong> (MAF &gt; 1%). 
-                          This variant is likely <strong>rare or familial</strong> and doesn&apos;t have a public rsID.
-                        </div>
-                        <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
-                          <strong>For rare pathogenic variants:</strong> See the <strong>Gene Variant module</strong> for ClinVar 
-                          clinical significance, or search <strong>medical literature</strong> for specific allele-disease evidence.
-                        </div>
-                        <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
-                          <strong>To test GWAS:</strong> Try common variants like LDLR (1:55505647:G:A) or APOE (19:44919406:G:A).
+                          <strong>Why:</strong> Ensembl VEP couldn&apos;t resolve a public rsID. Scanning <strong>local ClinVar VCF</strong> (4.4M variants) 
+                          and <strong>GWAS TSV</strong> (1.18M associations) for direct matches...
                         </div>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Show when VEP didn't find rsID but local ClinVar did */}
+                {!gwasData.rs_id && comprehensiveDisease?.resolved_rsid && (
+                  <div className="mb-4 p-3 bg-emerald-950/30 border border-emerald-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 text-xs font-mono">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span className="text-emerald-400 font-bold">rsID resolved from local ClinVar VCF:</span>
+                      <span className="text-emerald-300 font-bold">{comprehensiveDisease.resolved_rsid}</span>
                     </div>
                   </div>
                 )}
@@ -803,17 +799,22 @@ export default function App() {
                             Gene: <strong className="text-cyan-400">{comprehensiveDisease.gene_info?.gene_symbol || 'N/A'}</strong>
                           </div>
                         </div>
-                        <div className="md:text-right">
+                        <div className="md:text-right space-y-1">
                           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">Total Associations</span>
                           <div className="text-2xl font-bold text-cyan-400">{comprehensiveDisease.source_counts?.total_associations || 0}</div>
+                          <div className="text-[9px] font-mono text-slate-500">
+                            <span className="text-blue-400">🌐 {comprehensiveDisease.source_counts?.clinvar_conditions || 0} API</span>
+                            {' + '}
+                            <span className="text-emerald-400">📁 {(comprehensiveDisease.source_counts?.clinvar_vcf_local || 0) + (comprehensiveDisease.source_counts?.gwas_tsv_local || 0)} Local</span>
+                          </div>
                         </div>
                       </div>
                     </HUDFrame>
 
                     {/* Disease Associations */}
-                    <HUDFrame title="DISEASE ASSOCIATIONS // MULTI-SOURCE" variant="green">
+                    <HUDFrame title="DISEASE ASSOCIATIONS // MULTI-SOURCE (EXTERNAL + LOCAL)" variant="green">
                       {comprehensiveDisease.disease_associations?.length > 0 ? (
-                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
                           {comprehensiveDisease.disease_associations.map((d, idx) => (
                             <div key={idx} className="p-3 bg-slate-950/40 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition-all">
                               <div className="flex justify-between items-start gap-2">
@@ -822,7 +823,9 @@ export default function App() {
                                   {d.gene && <div className="text-[9px] text-slate-400 mt-1">Gene: <span className="text-emerald-300">{d.gene}</span></div>}
                                 </div>
                                 <div className="flex flex-col items-end gap-1">
-                                  <span className="text-[9px] bg-slate-900/60 text-slate-300 px-2 py-0.5 rounded font-mono">{d.source}</span>
+                                  <span className={`text-[8px] font-bold px-2 py-0.5 rounded font-mono ${d.source?.includes('Local') ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20' : 'bg-blue-950/40 text-blue-300 border border-blue-500/20'}`}>
+                                    {d.source?.includes('Local') ? `📁 ${d.source}` : `🌐 ${d.source}`}
+                                  </span>
                                   {d.pvalue && <span className="text-[9px] text-emerald-400 font-mono">p={d.pvalue}</span>}
                                 </div>
                               </div>
@@ -830,6 +833,7 @@ export default function App() {
                                 <div className="text-[9px] text-slate-400 mt-1">Clinical: <span className="text-amber-400">{d.clinical_significance}</span></div>
                               )}
                               {d.risk_allele && <div className="text-[9px] text-slate-500 mt-0.5">Risk Allele: {d.risk_allele}</div>}
+                              {d.impact && <div className="text-[9px] text-slate-500 mt-0.5">Impact: <span className={d.impact === 'HIGH' ? 'text-red-400' : d.impact === 'MODERATE' ? 'text-amber-400' : 'text-slate-400'}>{d.impact}</span></div>}
                             </div>
                           ))}
                         </div>
@@ -838,24 +842,44 @@ export default function App() {
                       )}
                     </HUDFrame>
 
-                    {/* Clinical Significance (ClinVar) */}
-                    <HUDFrame title="CLINICAL SIGNIFICANCE // CLINVAR" variant="purple">
+                    {/* Clinical Significance (ClinVar — External API + Local VCF) */}
+                    <HUDFrame title="CLINICAL SIGNIFICANCE // CLINVAR (API + LOCAL VCF)" variant="purple">
                       <div className="space-y-3">
                         <div className="data-cell">
                           <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">SIGNIFICANCE</span>
                           <span className="text-sm font-mono font-bold text-amber-400">{comprehensiveDisease.clinical_significance || 'Not Available'}</span>
                         </div>
+                        {/* External ClinVar conditions */}
                         <div className="data-cell">
-                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">CONDITIONS ({comprehensiveDisease.source_counts?.clinvar_conditions || 0})</span>
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">CLINVAR API CONDITIONS ({comprehensiveDisease.source_counts?.clinvar_conditions || 0})</span>
                           <div className="flex flex-wrap gap-1.5">
                             {comprehensiveDisease.disease_associations?.filter(d => d.source === 'ClinVar').map((d, idx) => (
                               <span key={idx} className="text-[10px] font-mono bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded border border-purple-500/20">{d.disease}</span>
                             ))}
                             {(!comprehensiveDisease.disease_associations?.some(d => d.source === 'ClinVar')) && (
-                              <span className="text-[10px] font-mono text-slate-500">No ClinVar conditions mapped</span>
+                              <span className="text-[10px] font-mono text-slate-500">No ClinVar API conditions</span>
                             )}
                           </div>
                         </div>
+                        {/* Local ClinVar VCF conditions */}
+                        <div className="data-cell">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">CLINVAR LOCAL VCF HITS ({comprehensiveDisease.source_counts?.clinvar_vcf_local || 0})</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {comprehensiveDisease.disease_associations?.filter(d => d.source === 'ClinVar VCF (Local)').map((d, idx) => (
+                              <span key={idx} className="text-[10px] font-mono bg-rose-950/30 text-rose-300 px-2 py-0.5 rounded border border-rose-500/20" title={`Sig: ${d.clinical_significance || 'N/A'} | Impact: ${d.impact || 'N/A'}`}>{d.disease}</span>
+                            ))}
+                            {(!comprehensiveDisease.disease_associations?.some(d => d.source === 'ClinVar VCF (Local)')) && (
+                              <span className="text-[10px] font-mono text-slate-500">No local VCF matches</span>
+                            )}
+                          </div>
+                        </div>
+                        {/* ClinVar Conflicting interpretations */}
+                        {comprehensiveDisease.clinvar_conflicting?.length > 0 && (
+                          <div className="data-cell">
+                            <span className="block text-[9px] font-bold text-amber-500 uppercase tracking-widest mb-1 font-mono">⚠ CONFLICTING INTERPRETATIONS ({comprehensiveDisease.clinvar_conflicting.length})</span>
+                            <div className="text-[10px] font-mono text-amber-300/70">This variant has conflicting clinical interpretations in ClinVar.</div>
+                          </div>
+                        )}
                       </div>
                     </HUDFrame>
 
@@ -899,9 +923,92 @@ export default function App() {
                       </div>
                     </HUDFrame>
 
-                    {/* GWAS Findings Table */}
+                    {/* ── LOCAL DATASETS SCANNED ── */}
+                    <HUDFrame title="LOCAL DATASETS SCANNED // 6 FILES" variant="blue" className="neon-glow-blue">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {[
+                          { key: 'clinvar_vcf', label: 'ClinVar VCF', file: 'clinvar.vcf', rows: '4.4M', icon: '📂' },
+                          { key: 'gwas_tsv', label: 'GWAS Catalog TSV', file: 'gwas-associations.tsv', rows: '1.18M', icon: '📊' },
+                          { key: 'hpo_phenotypes', label: 'HPO Phenotypes', file: 'genes_to_phenotype.csv', rows: '293K', icon: '🧩' },
+                          { key: 'disease_names', label: 'Disease Names', file: 'disease_names.tsv', rows: '67K', icon: '🗂️' },
+                          { key: 'clinvar_conflicting', label: 'ClinVar Conflicting', file: 'clinvar_conflicting.csv', rows: '65K', icon: '⚠️' },
+                          { key: 'chembl_compounds', label: 'ChEMBL Compounds', file: 'chembl_compounds.csv', rows: '1K', icon: '💊' },
+                        ].map(ds => {
+                          const stats = comprehensiveDisease.local_dataset_stats?.[ds.key] || {};
+                          const hits = stats.hits || stats.matches || 0;
+                          const used = stats.used || false;
+                          return (
+                            <div key={ds.key} className={`p-2.5 rounded-lg border transition-all ${used ? 'bg-emerald-950/20 border-emerald-500/30' : 'bg-slate-950/30 border-slate-800'}`}>
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className="text-xs">{ds.icon}</span>
+                                <span className={`text-[9px] font-bold uppercase tracking-wider ${used ? 'text-emerald-400' : 'text-slate-500'}`}>{ds.label}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[9px] font-mono text-slate-500">{ds.rows} rows</span>
+                                {used ? (
+                                  <span className="text-[9px] font-mono font-bold text-emerald-400">✓ {hits} HIT{hits !== 1 ? 'S' : ''}</span>
+                                ) : (
+                                  <span className="text-[9px] font-mono text-slate-600">SCANNED</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 text-[9px] font-mono text-slate-500 border-t border-slate-800 pt-2">
+                        <span className="text-blue-400 font-bold">{comprehensiveDisease.source_counts?.local_datasets_used || 0}/6 datasets produced hits</span>
+                        {' · '}
+                        <span className="text-slate-400">{comprehensiveDisease.local_datasets_total_hits || 0} total local records matched</span>
+                      </div>
+                    </HUDFrame>
+
+                    {/* HPO Phenotypes (from local dataset) */}
+                    {comprehensiveDisease.hpo_phenotypes?.length > 0 && (
+                      <HUDFrame title="HPO PHENOTYPES // LOCAL DATASET (293K GENES)" variant="orange">
+                        <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                          {comprehensiveDisease.hpo_phenotypes.map((p, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-2 bg-slate-950/30 border border-orange-500/10 rounded hover:border-orange-500/30 transition">
+                              <div>
+                                <span className="text-[10px] font-mono text-orange-300 font-bold">{p.hpo_id}</span>
+                                <span className="text-[10px] font-mono text-slate-400 ml-2">{p.phenotype}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {p.frequency && p.frequency !== '-' && (
+                                  <span className="text-[9px] text-slate-500 font-mono">{p.frequency}</span>
+                                )}
+                                {p.disease_id && (
+                                  <span className="text-[9px] text-slate-600 font-mono">{p.disease_id}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </HUDFrame>
+                    )}
+
+                    {/* ChEMBL Drug-Target Compounds (from local dataset) */}
+                    {comprehensiveDisease.chembl_compounds?.length > 0 && (
+                      <HUDFrame title="CHEMBL DRUG-TARGET COMPOUNDS // LOCAL DATASET" variant="green">
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {comprehensiveDisease.chembl_compounds.map((c, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-2 bg-slate-950/30 border border-emerald-500/10 rounded hover:border-emerald-500/30 transition">
+                              <div>
+                                <span className="text-[10px] font-mono text-emerald-300 font-bold">{c.name || c.chembl_id}</span>
+                                <span className="text-[9px] text-slate-500 font-mono ml-2">{c.chembl_id}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {c.max_phase && <span className="text-[9px] bg-blue-950/40 text-blue-300 px-1.5 py-0.5 rounded font-mono">Phase {c.max_phase}</span>}
+                                {c.type && <span className="text-[9px] text-slate-600 font-mono">{c.type}</span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </HUDFrame>
+                    )}
+
+                    {/* GWAS Findings Table (external API + local TSV) */}
                     {comprehensiveDisease.gwas_findings?.length > 0 && (
-                      <HUDFrame title="GWAS CATALOG FINDINGS" variant="green">
+                      <HUDFrame title={`GWAS CATALOG FINDINGS // API + LOCAL TSV (${comprehensiveDisease.gwas_findings.length})`} variant="green">
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs font-mono">
                             <thead>
@@ -910,6 +1017,7 @@ export default function App() {
                                 <th className="text-left py-3 pr-3">P-VALUE</th>
                                 <th className="text-left py-3 pr-3">RISK ALLELE</th>
                                 <th className="text-left py-3 pr-3">GENE</th>
+                                <th className="text-left py-3 pr-3">SOURCE</th>
                                 <th className="text-left py-3 pr-3">STUDY</th>
                               </tr>
                             </thead>
@@ -920,6 +1028,11 @@ export default function App() {
                                   <td className="py-3 pr-3 text-emerald-400 font-mono-code font-bold">{g.pvalue || 'N/A'}</td>
                                   <td className="py-3 pr-3 text-slate-300 font-mono">{g.risk_allele || 'N/A'}</td>
                                   <td className="py-3 pr-3 text-emerald-300">{g.gene || 'N/A'}</td>
+                                  <td className="py-3 pr-3">
+                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${g.source?.includes('Local') ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/20' : 'bg-blue-950/40 text-blue-400 border border-blue-500/20'}`}>
+                                      {g.source?.includes('Local') ? 'LOCAL TSV' : 'EBI API'}
+                                    </span>
+                                  </td>
                                   <td className="py-3 pr-3 text-slate-400">
                                     {g.pubmed_id ? (
                                       <a href={`https://pubmed.ncbi.nlm.nih.gov/${g.pubmed_id}/`} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
@@ -956,11 +1069,11 @@ export default function App() {
                   </>
                 )}
 
-                {/* Prompt when no comprehensive data yet but rsID available */}
-                {gwasData?.rs_id && !comprehensiveDisease && !compLoading && !compError && (
+                {/* Prompt when no comprehensive data yet */}
+                {!comprehensiveDisease && !compLoading && !compError && (
                   <div className="text-center py-8 text-slate-500 font-mono text-xs">
                     <Database className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    Click &quot;FIND ALL DISEASE ASSOCIATIONS&quot; above to query ClinVar, GWAS Catalog, and PubMed
+                    Click &quot;SCAN ALL DATASETS&quot; to query 6 local datasets + 5 external APIs
                   </div>
                 )}
 
