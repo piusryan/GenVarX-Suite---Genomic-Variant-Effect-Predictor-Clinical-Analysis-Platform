@@ -1,6 +1,8 @@
 import asyncio
 import httpx
 from typing import Any, Dict, List, Optional
+import pandas as pd
+import os
 
 GWAS_CATALOG_BASE_URL = "https://www.ebi.ac.uk/gwas/rest/api"
 
@@ -9,6 +11,14 @@ _study_cache_lock = asyncio.Lock()
 
 
 async def fetch_gwas_associations(rs_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Fetch GWAS associations from external API or local TSV."""
+    
+    # First try local GWAS TSV
+    local_results = await _fetch_local_gwas(rs_id, limit)
+    if local_results:
+        return local_results
+    
+    # Fall back to external API
     headers = {"Accept": "application/json", "User-Agent": "GenVarX-App/1.0"}
 
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
@@ -49,6 +59,40 @@ async def fetch_gwas_associations(rs_id: str, limit: int = 20) -> List[Dict[str,
             await asyncio.gather(*enrich_tasks)
 
         return out
+
+
+async def _fetch_local_gwas(rs_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Fetch GWAS data from local TSV file."""
+    try:
+        gwas_path = "data/datasets/clinvar/gwas-catalog-download-associations-v1.0-full.tsv"
+        if not os.path.exists(gwas_path):
+            return []
+        
+        df = pd.read_csv(gwas_path, sep='\t', low_memory=False, nrows=10000)
+        
+        # Search for RSID in variant_id column
+        if 'variant_id' not in df.columns:
+            return []
+        
+        matches = df[df['variant_id'].astype(str).str.contains(rs_id, na=False, case=False)].head(limit)
+        
+        results = []
+        for _, row in matches.iterrows():
+            results.append({
+                "trait": str(row.get('disease_trait', 'Unknown')),
+                "pvalue": str(row.get('p_value', 'N/A')),
+                "reported_trait": str(row.get('disease_trait', '')),
+                "study_accession": str(row.get('study_accession', '')),
+                "pubmed_id": str(row.get('pubmed_id', '')),
+                "strongest_allele": str(row.get('variant_id', '')),
+                "or_value": str(row.get('or_or_beta', '')),
+                "gene": str(row.get('mapped_gene', ''))
+            })
+        
+        return results
+    except Exception as e:
+        print(f"[GWAS] Local TSV search error: {e}")
+        return []
 
 
 def _extract_trait(assoc: Dict[str, Any]) -> str:

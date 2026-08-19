@@ -8,6 +8,13 @@ class VariantRequest(BaseModel):
         description="Format: chr:pos:ref:alt (e.g., 17:43044295:G:A)"
     )
 
+class DiseaseRequest(BaseModel):
+    disease: str = Field(
+        ..., 
+        json_schema_extra={"example": "Hereditary Breast Cancer"}, 
+        description="Disease name to search"
+    )
+
 class VariantAnnotation(BaseModel):
     variant: str
     rs_id: Optional[str] = None

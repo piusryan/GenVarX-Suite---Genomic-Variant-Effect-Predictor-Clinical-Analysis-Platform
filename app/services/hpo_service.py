@@ -23,6 +23,7 @@ _load_error: Optional[str] = None
 async def fetch_phenotypes_for_disease(disease_name: str) -> List[Dict[str, str]]:
     """
     Fetch HPO phenotypes associated with a disease name.
+    Searches local genes_to_phenotype.csv file.
     
     Args:
         disease_name: e.g., "Hereditary Breast and Ovarian Cancer Syndrome"
@@ -30,27 +31,51 @@ async def fetch_phenotypes_for_disease(disease_name: str) -> List[Dict[str, str]
     Returns:
         List of phenotype terms with descriptions
     """
-    await _ensure_loaded()
-    if _load_error:
-        return []
+    import os
     
     phenotypes = []
     disease_lower = disease_name.lower()
+    hpo_path = "data/datasets/hpo/genes_to_phenotype.csv"
     
-    # Search through HPO graph for matching diseases
-    for node_id, node_data in _hpo_graph.items():
-        name = node_data.get("name", "").lower()
-        if disease_lower in name or name in disease_lower:
-            # Found matching disease, extract phenotypes
-            children = node_data.get("children", [])
-            for child_id in children[:10]:  # Limit to 10 phenotypes
-                if child_id in _hpo_graph:
-                    child = _hpo_graph[child_id]
+    if not os.path.exists(hpo_path):
+        return []
+    
+    try:
+        import pandas as pd
+        df = pd.read_csv(hpo_path, low_memory=False)
+        
+        # Search in disease_name column
+        if 'disease_name' in df.columns:
+            matches = df[df['disease_name'].str.lower().str.contains(disease_lower, na=False, regex=False)]
+            seen = set()
+            for _, row in matches.head(20).iterrows():
+                hpo_id = str(row.get('hpo_id', ''))
+                hpo_name = str(row.get('hpo_name', 'Unknown'))
+                if hpo_id not in seen and hpo_id != 'nan':
+                    seen.add(hpo_id)
                     phenotypes.append({
-                        "id": child_id,
-                        "name": child.get("name", "Unknown"),
-                        "definition": child.get("def", "")
+                        "id": hpo_id,
+                        "name": hpo_name,
+                        "definition": str(row.get('frequency', ''))
                     })
+    except Exception as e:
+        print(f"[HPO] Phenotype search error: {e}")
+    
+    # Fallback to HPO JSON if available
+    await _ensure_loaded()
+    if _hpo_graph and not phenotypes:
+        for node_id, node_data in _hpo_graph.items():
+            name = node_data.get("name", "").lower()
+            if disease_lower in name or name in disease_lower:
+                children = node_data.get("children", [])
+                for child_id in children[:10]:
+                    if child_id in _hpo_graph:
+                        child = _hpo_graph[child_id]
+                        phenotypes.append({
+                            "id": child_id,
+                            "name": child.get("name", "Unknown"),
+                            "definition": child.get("def", "")
+                        })
     
     return phenotypes
 

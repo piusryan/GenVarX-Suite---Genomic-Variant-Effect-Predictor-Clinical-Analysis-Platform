@@ -1,14 +1,18 @@
 import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.models import VariantRequest, VariantAnnotation, GwasResponse, GwasAssociation, CompoundSummary, CompoundDetail
+from typing import List
+from app.models import VariantRequest, DiseaseRequest, VariantAnnotation, GwasResponse, GwasAssociation, CompoundSummary, CompoundDetail
 from app.services.vep_service import fetch_vep_annotation
 from app.services.clinvar_service import fetch_clinvar_data
 from app.services.gwas_service import fetch_gwas_associations
+from app.services.local_gwas_service import search_local_disease_associations, get_dataset_summary
+from app.services.disease_search_service import search_disease_associations, get_available_diseases
 from app.services.chembl_local_service import search_compounds, get_compound
 from app.services.hpo_service import fetch_phenotypes_for_disease
 from app.services.motif_service import analyze_variant_motif_impact
 from app.services.conservation_service import calculate_substitution_cost
+from app.services.rsid_to_disease_service import get_diseases_by_rsid, get_diseases_by_rsids, get_rsid_gene_disease_mapping
 
 app = FastAPI(title="GenVarX Engine API", version="1.0.0")
 
@@ -26,9 +30,31 @@ def health_check():
 
 @app.post("/api/annotate", response_model=VariantAnnotation)
 async def annotate(payload: VariantRequest):
-    # Fire VEP and ClinVar lookups simultaneously in parallel
-    vep_task = fetch_vep_annotation(payload.variant)
-    clinvar_task = fetch_clinvar_data(payload.variant)
+    variant_input = payload.variant.strip()
+    
+    # Check if input is just an RSID (e.g., rs71559014)
+    if variant_input.startswith('rs') and ':' not in variant_input:
+        # It's an RSID - search in GWAS/ClinVar directly
+        rsid_diseases = await get_diseases_by_rsid(variant_input)
+        
+        diseases = [f"{d['disease']} (Gene: {d['gene']})" for d in rsid_diseases.get('diseases', [])[:3]]
+        
+        return VariantAnnotation(
+            variant=variant_input,
+            rs_id=variant_input,
+            gene_symbol="Multiple",
+            consequence="GWAS Variant",
+            sift_prediction="N/A",
+            polyphen_prediction="N/A",
+            amino_acid_change="N/A",
+            impact_level="MODERATE",
+            clinical_significance=diseases[0] if diseases else "Common variant",
+            associated_diseases=diseases
+        )
+    
+    # Otherwise process as full variant
+    vep_task = fetch_vep_annotation(variant_input)
+    clinvar_task = fetch_clinvar_data(variant_input)
 
     vep_result, clinvar_result = await asyncio.gather(vep_task, clinvar_task)
 
@@ -65,16 +91,174 @@ async def annotate(payload: VariantRequest):
 
 @app.post("/api/gwas", response_model=GwasResponse)
 async def gwas(payload: VariantRequest):
-    vep_result = await fetch_vep_annotation(payload.variant)
-    rs_id = getattr(vep_result, "rs_id", None)
+    variant_input = payload.variant.strip()
+    rs_id = None
+    
+    # Check if input is just an RSID
+    if variant_input.startswith('rs') and ':' not in variant_input:
+        rs_id = variant_input
+    else:
+        # Otherwise extract from VEP
+        vep_result = await fetch_vep_annotation(variant_input)
+        rs_id = getattr(vep_result, "rs_id", None)
+    
+    print(f"[GWAS DEBUG] Input variant: {variant_input}")
+    print(f"[GWAS DEBUG] Extracted rsID: {rs_id}")
+    
     if not rs_id:
-        return GwasResponse(rs_id=None, associations=[], note="rsID not found for this variant")
+        return GwasResponse(
+            rs_id=None, 
+            associations=[], 
+            note="⚠️ rsID not found for this variant - likely rare/familial variant not in GWAS Catalog"
+        )
 
     assoc_rows = await fetch_gwas_associations(rs_id, limit=20)
     associations = [GwasAssociation(**row) for row in assoc_rows]
-    note = None if associations else "No GWAS Catalog associations found"
+    note = None if associations else "✓ rsID found but no GWAS Catalog associations available"
 
     return GwasResponse(rs_id=rs_id, associations=associations, note=note)
+
+
+@app.post("/api/gwas/dataset-analysis")
+async def gwas_dataset_analysis(payload: VariantRequest):
+    """Analyze variant against local datasets and show diagnostic info."""
+    import os
+    import pandas as pd
+    
+    variant = payload.variant
+    vep_result = await fetch_vep_annotation(variant)
+    rs_id = getattr(vep_result, "rs_id", None)
+    
+    analysis = {
+        "variant": variant,
+        "vep_extraction": {
+            "rs_id": rs_id,
+            "gene_symbol": vep_result.gene_symbol,
+            "consequence": vep_result.consequence,
+            "clinical_significance": vep_result.clinical_significance,
+            "associated_diseases": vep_result.associated_diseases,
+        },
+        "local_datasets": {},
+        "gwas_catalog_status": None,
+        "diagnostic_message": None
+    }
+    
+    # Check local GWAS data if any
+    gwas_dir = "data/datasets"
+    if os.path.exists(gwas_dir):
+        for subdir in os.listdir(gwas_dir):
+            subdir_path = os.path.join(gwas_dir, subdir)
+            if os.path.isdir(subdir_path):
+                files = os.listdir(subdir_path)
+                analysis["local_datasets"][subdir] = {
+                    "files": files,
+                    "file_count": len(files),
+                    "path": subdir_path
+                }
+    
+    # Check GWAS associations
+    if rs_id:
+        assoc_rows = await fetch_gwas_associations(rs_id, limit=5)
+        analysis["gwas_catalog_status"] = {
+            "found": len(assoc_rows) > 0,
+            "count": len(assoc_rows),
+            "associations": assoc_rows
+        }
+        if assoc_rows:
+            analysis["diagnostic_message"] = f"✓ GWAS Catalog: Found {len(assoc_rows)} associations"
+        else:
+            analysis["diagnostic_message"] = f"⚠️ rsID {rs_id} exists but has no GWAS associations"
+    else:
+        analysis["gwas_catalog_status"] = {
+            "found": False,
+            "count": 0,
+            "associations": []
+        }
+        analysis["diagnostic_message"] = "✗ No rsID found - variant not recognized by VEP/GWAS"
+    
+    return analysis
+
+
+@app.post("/api/disease-associations")
+async def disease_associations(payload: VariantRequest):
+    """
+    Find disease associations from LOCAL datasets.
+    Handles both full variants and RSIDs.
+    """
+    variant_input = payload.variant.strip()
+    
+    # Check if input is just an RSID
+    if variant_input.startswith('rs') and ':' not in variant_input:
+        rsid_result = await get_diseases_by_rsid(variant_input)
+        return {
+            "variant": variant_input,
+            "rsid": variant_input,
+            "gene_symbol": "Multiple",
+            "local_findings": rsid_result,
+            "source": "LOCAL_RSID_MAPPING"
+        }
+    
+    # Otherwise process as full variant
+    vep_result = await fetch_vep_annotation(variant_input)
+    gene_symbol = vep_result.gene_symbol
+    
+    # Search local datasets
+    local_results = await search_local_disease_associations(variant_input, gene_symbol)
+    
+    return {
+        "variant": variant_input,
+        "gene_symbol": gene_symbol,
+        "local_findings": local_results,
+        "source": "LOCAL_DATASETS"
+    }
+
+
+@app.post("/api/disease-search")
+async def search_by_disease(payload: DiseaseRequest):
+    """
+    Search for disease associations using disease name as input.
+    Returns variants, genes, phenotypes, and drugs associated with the disease.
+    This is the inverse of the variant-first approach - disease-first search.
+    """
+    disease_name = payload.disease.strip()
+    
+    if not disease_name or len(disease_name) < 2:
+        raise HTTPException(status_code=400, detail="Disease name must be at least 2 characters")
+    
+    results = await search_disease_associations(disease_name)
+    
+    return {
+        "disease_query": disease_name,
+        "results": results,
+        "source": "LOCAL_DISEASE_SEARCH"
+    }
+
+
+@app.get("/api/disease-search/available")
+async def list_available_diseases(limit: int = 100):
+    """
+    Get list of available diseases that can be searched.
+    Useful for autocomplete in UI.
+    """
+    diseases = await get_available_diseases(limit)
+    
+    return {
+        "total_available": len(diseases),
+        "diseases": diseases,
+        "note": "Diseases from ClinVar disease_names.tsv"
+    }
+
+
+@app.get("/api/datasets/summary")
+async def datasets_summary():
+    """Get summary of available datasets."""
+    summary = await get_dataset_summary()
+    return {
+        "datasets": summary,
+        "timestamp": "2024",
+        "note": "Shows first 10 entries per dataset"
+    }
+
 
 
 @app.get("/api/compounds", response_model=list[CompoundSummary])
@@ -193,6 +377,90 @@ async def get_conservation_score(ref_aa: str, alt_aa: str):
                 "DELETERIOUS": "Non-conservative - likely damaging",
                 "SEVERE": "Highly disruptive substitution"
             }.get(classification, "Unknown")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/api/rsid-to-disease/{rsid}")
+async def get_rsid_diseases(rsid: str):
+    """
+    Get all diseases associated with a given RSID.
+    
+    Args:
+        rsid: SNP rsID (e.g., rs3093017)
+    
+    Returns:
+        List of diseases and associated information for this variant
+    
+    Example:
+        GET /api/rsid-to-disease/rs3093017
+    """
+    try:
+        result = await get_diseases_by_rsid(rsid)
+        return {
+            "query": rsid,
+            "result": result,
+            "source": "RSID_TO_DISEASE_MAPPER"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rsid-to-disease/batch")
+async def get_rsids_diseases_batch(rsids: List[str]):
+    """
+    Get diseases associated with multiple RSIDs (batch query).
+    
+    Args:
+        rsids: List of SNP rsIDs
+    
+    Returns:
+        Dictionary with disease associations for each RSID
+    
+    Example:
+        POST /api/rsid-to-disease/batch
+        {
+            "rsids": ["rs3093017", "rs6311", "rs1234567"]
+        }
+    """
+    try:
+        if not rsids or len(rsids) == 0:
+            raise HTTPException(status_code=400, detail="At least one RSID required")
+        
+        if len(rsids) > 100:
+            raise HTTPException(status_code=400, detail="Maximum 100 RSIDs per batch allowed")
+        
+        result = await get_diseases_by_rsids(rsids)
+        return {
+            "query_type": "batch",
+            "result": result,
+            "source": "RSID_TO_DISEASE_MAPPER"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rsid-to-disease/mapping/info")
+async def get_rsid_disease_mapping_info():
+    """
+    Get information about available RSID-to-Disease mappings.
+    
+    Returns:
+        Statistics about the RSID to Gene to Disease mapping dataset
+    
+    Example:
+        GET /api/rsid-to-disease/mapping/info
+    """
+    try:
+        result = await get_rsid_gene_disease_mapping()
+        return {
+            "mapping_info": result,
+            "source": "ClinVar",
+            "note": "Use /api/rsid-to-disease/{rsid} to query specific RSID"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
