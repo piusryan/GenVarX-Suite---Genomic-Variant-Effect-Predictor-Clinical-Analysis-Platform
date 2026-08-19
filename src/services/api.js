@@ -131,3 +131,20 @@ export const getDiseasesByRsid = async (rsid) => {
     }
   }
 };
+
+export const getComprehensiveDisease = async (variantString) => {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}/api/disease-comprehensive/${encodeURIComponent(variantString)}`
+    );
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Comprehensive disease lookup failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};

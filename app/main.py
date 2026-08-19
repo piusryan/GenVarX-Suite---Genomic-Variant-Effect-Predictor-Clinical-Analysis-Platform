@@ -13,6 +13,7 @@ from app.services.hpo_service import fetch_phenotypes_for_disease
 from app.services.motif_service import analyze_variant_motif_impact
 from app.services.conservation_service import calculate_substitution_cost
 from app.services.rsid_to_disease_service import get_diseases_by_rsid, get_diseases_by_rsids, get_rsid_gene_disease_mapping
+from app.services.comprehensive_disease_service import get_comprehensive_disease
 
 app = FastAPI(title="GenVarX Engine API", version="1.0.0")
 
@@ -462,5 +463,19 @@ async def get_rsid_disease_mapping_info():
             "source": "ClinVar",
             "note": "Use /api/rsid-to-disease/{rsid} to query specific RSID"
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/disease-comprehensive/{variant:path}")
+async def comprehensive_disease_lookup(variant: str):
+    """
+    Comprehensive Variant-to-Disease query pipeline.
+    Accepts genomic coordinates (7:140753336:A:T) or RSID (rs113488022).
+    Aggregates data from VEP, ClinVar, GWAS Catalog, Ensembl, and PubMed.
+    """
+    try:
+        result = await get_comprehensive_disease(variant)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

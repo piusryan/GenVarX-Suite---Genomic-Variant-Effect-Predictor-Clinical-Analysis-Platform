@@ -1,0 +1,26 @@
+INFO:     127.0.0.1:23282 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:15622 - "POST /api/annotate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:10577 - "OPTIONS /api/annotate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:10577 - "POST /api/annotate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:27916 - "OPTIONS /api/gwas HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38264 - "OPTIONS /api/gwas/dataset-analysis HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1106 - "OPTIONS /api/disease-associations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38264 - "POST /api/disease-associations HTTP/1.1" 200 OK
+[GWAS DEBUG] Input variant: 17:43044295:G:A
+[GWAS DEBUG] Extracted rsID: None
+INFO:     127.0.0.1:27916 - "POST /api/gwas HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1106 - "POST /api/gwas/dataset-analysis HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51789 - "GET /api/rsid-to-disease/rs6414541 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40585 - "POST /api/annotate HTTP/1.1" 200 OK
+[GWAS DEBUG] Input variant: rs28934576
+[GWAS DEBUG] Extracted rsID: rs28934576
+INFO:     127.0.0.1:14693 - "POST /api/gwas/dataset-analysis HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53681 - "POST /api/disease-associations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:14693 - "GET /api/rsid-to-disease/rs28934576 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55706 - "POST /api/gwas HTTP/1.1" 500 Internal Server Error
+[GWAS DEBUG] Input variant: rs28934576
+[GWAS DEBUG] Extracted rsID: rs28934576
+INFO:     127.0.0.1:61818 - "POST /api/gwas/dataset-analysis HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59825 - "POST /api/disease-associations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56138 - "POST /api/gwas HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52267 - "GET /api/rsid-to-disease/rs28934576 HTTP/1.1" 200 OK

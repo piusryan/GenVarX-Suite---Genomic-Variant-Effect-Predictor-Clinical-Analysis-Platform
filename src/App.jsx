@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound, getDiseasesByRsid } from './services/api';
-import { Dna, Search, AlertTriangle, Activity, ShieldAlert, Loader2, Database, Pill, Network, Terminal, Shield, RefreshCw } from 'lucide-react';
+import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound, getDiseasesByRsid, getComprehensiveDisease } from './services/api';
+import { Dna, Search, AlertTriangle, Activity, ShieldAlert, Loader2, Database, Pill, Network, Terminal, Shield, RefreshCw, Copy, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import VariantVisualizer from './components/VariantVisualizer';
 import AdvancedProtein3D from './components/AdvancedProtein3D';
@@ -26,6 +26,18 @@ export default function App() {
   const [rsidDiseases, setRsidDiseases] = useState(null);
   const [rsidLoading, setRsidLoading] = useState(false);
   const [rsidError, setRsidError] = useState(null);
+  
+  // RSID Search Module State
+  const [rsidSearchInput, setRsidSearchInput] = useState('rs6414541');
+  const [rsidSearchLoading, setRsidSearchLoading] = useState(false);
+  const [rsidSearchResults, setRsidSearchResults] = useState(null);
+  const [rsidSearchError, setRsidSearchError] = useState(null);
+
+  // Comprehensive disease lookup (multi-API aggregator)
+  const [comprehensiveDisease, setComprehensiveDisease] = useState(null);
+  const [compLoading, setCompLoading] = useState(false);
+  const [compError, setCompError] = useState(null);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   const [compoundQuery, setCompoundQuery] = useState('selinexor');
   const [compoundLoading, setCompoundLoading] = useState(false);
@@ -61,26 +73,47 @@ export default function App() {
     }
   };
 
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2000);
+  };
+
+  const handleComprehensiveDisease = async () => {
+    const input = gwasInput.trim();
+    if (!input) return;
+    setCompLoading(true);
+    setCompError(null);
+    try {
+      const result = await getComprehensiveDisease(input);
+      setComprehensiveDisease(result);
+    } catch (err) {
+      setCompError(err.message);
+      setComprehensiveDisease(null);
+    } finally {
+      setCompLoading(false);
+    }
+  };
+
   const handleGwasSearch = async (e) => {
     if (e) e.preventDefault();
     if (!gwasInput.trim()) return;
 
     setGwasLoading(true);
     setGwasError(null);
+    setComprehensiveDisease(null);
+    setCompError(null);
     try {
-      const [gwasResult, analysis, diseaseResult] = await Promise.all([
-        fetchGwasAssociations(gwasInput.trim()),
-        gwasDatasetAnalysis(gwasInput.trim()),
-        getDiseaseAssociations(gwasInput.trim())
+      const [annotationResult, diseaseResult] = await Promise.all([
+        annotateVariant(gwasInput.trim()),
+        getComprehensiveDisease(gwasInput.trim())
       ]);
-      setGwasData(gwasResult);
-      setDatasetAnalysis(analysis);
-      setDiseaseAssoc(diseaseResult);
+      setGwasData(annotationResult);
+      setComprehensiveDisease(diseaseResult);
     } catch (err) {
       setGwasError(err.message);
       setGwasData(null);
-      setDatasetAnalysis(null);
-      setDiseaseAssoc(null);
+      setComprehensiveDisease(null);
     } finally {
       setGwasLoading(false);
     }
@@ -98,6 +131,23 @@ export default function App() {
       setRsidDiseases(null);
     } finally {
       setRsidLoading(false);
+    }
+  };
+
+  const handleRsidModuleSearch = async (e) => {
+    if (e) e.preventDefault();
+    if (!rsidSearchInput.trim()) return;
+
+    setRsidSearchLoading(true);
+    setRsidSearchError(null);
+    try {
+      const result = await getDiseasesByRsid(rsidSearchInput.trim());
+      setRsidSearchResults(result);
+    } catch (err) {
+      setRsidSearchError(err.message);
+      setRsidSearchResults(null);
+    } finally {
+      setRsidSearchLoading(false);
     }
   };
 
@@ -550,6 +600,23 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔴 Cancer (Somatic & Germline)</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setGwasInput('7:140753336:A:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRAF V600E (Melanoma)</button>
+                      <button type="button" onClick={() => { setGwasInput('17:43044295:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRCA1 (Breast)</button>
+                      <button type="button" onClick={() => { setGwasInput('7:55249071:T:G'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">EGFR (Lung)</button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟣 Neurological</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setGwasInput('19:50958929:T:C'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">PSEN1 (Alzheimer)</button>
+                      <button type="button" onClick={() => { setGwasInput('6:32560756:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">HLA-DRB1 (MS)</button>
+                    </div>
+                  </div>
+
                   <div className="text-[8px] text-slate-500 mt-3 font-mono-code">
                     💡 These presets have public rsIDs and GWAS Catalog entries. Rare variants (like BRCA1) won't show GWAS data.
                   </div>
@@ -637,180 +704,280 @@ export default function App() {
               {/* GWAS associations table */}
               {gwasData && (
                 <>
-                  <HUDFrame title="GWAS PHENOTYPIC INDEX" variant="green" className="neon-glow-green">
-                  <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6 font-mono text-xs text-slate-400 border-b border-slate-900 pb-3">
-                    <div className="flex items-center gap-2">
-                      <Database className="w-4 h-4 text-emerald-400" />
-                      <span>RESOLVED RSID: <span className="font-bold text-slate-200">{gwasData.rs_id || 'N/A'}</span></span>
+                <HUDFrame title="VARIANT SUMMARY // RSID RESOLUTION" variant="green" className="neon-glow-green">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-lg font-mono font-bold text-slate-100">{gwasInput}</span>
+                      {gwasData.rs_id && (
+                        <button
+                          onClick={() => copyToClipboard(gwasData.rs_id)}
+                          className="flex items-center gap-2 px-4 py-2 bg-emerald-950/50 border-2 border-emerald-500/50 rounded-lg hover:border-emerald-400 hover:bg-emerald-900/40 transition-all group cursor-pointer"
+                          title="Click to copy RSID"
+                        >
+                          <span className="text-sm font-mono font-bold text-emerald-400 group-hover:text-emerald-300">{gwasData.rs_id}</span>
+                          {copySuccess ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                          ) : (
+                            <Copy className="w-4 h-4 text-emerald-500 group-hover:text-emerald-300" />
+                          )}
+                        </button>
+                      )}
+                      {copySuccess && <span className="text-[10px] text-emerald-400 font-mono font-bold animate-pulse">COPIED!</span>}
+                      {getImpactBadge(gwasData.impact_level || 'MODERATE')}
                     </div>
-                  </div>
-
-                  {/* Informative message when rsID not found */}
-                  {!gwasData.rs_id && (
-                    <div className="mb-6 p-4 bg-amber-950/30 border border-amber-500/30 rounded-lg space-y-2">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <div className="space-y-1">
-                          <div className="font-bold text-amber-400 text-xs uppercase tracking-wider">
-                            rsID Not Found - Variant Not in GWAS Catalog
-                          </div>
-                          <div className="text-[11px] text-slate-300 leading-relaxed">
-                            <strong>Why:</strong> GWAS Catalog contains only <strong>common population variants</strong> (MAF &gt; 1%). 
-                            This variant is likely <strong>rare or familial</strong> and doesn't have a public rsID.
-                          </div>
-                          <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
-                            <strong>For rare pathogenic variants:</strong> See the <strong>Gene Variant module</strong> for ClinVar 
-                            clinical significance, or search <strong>medical literature</strong> for specific allele-disease evidence.
-                          </div>
-                          <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
-                            <strong>To test GWAS:</strong> Try common variants like LDLR (1:55505647:G:A) or APOE (19:44919406:G:A).
-                          </div>
-                        </div>
-                      </div>
+                    <div className="flex items-center gap-4 text-xs font-mono text-slate-400">
+                      <span>Gene: <strong className="text-emerald-400">{gwasData.gene_symbol || 'N/A'}</strong></span>
+                      <span>Consequence: <strong className="text-slate-200">{(gwasData.consequence || 'N/A').replace(/_/g, ' ')}</strong></span>
                     </div>
-                  )}
-
-                  {gwasData.note && gwasData.rs_id && <span className="text-slate-500 text-xs mb-4 block">{gwasData.note}</span>}
-
-                  {gwasData.associations && gwasData.associations.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs font-mono">
-                        <thead>
-                          <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
-                            <th className="text-left py-3 pr-3">ASSOCIATED TRAIT / DISEASE</th>
-                            <th className="text-left py-3 pr-3">P-VALUE</th>
-                            <th className="text-left py-3 pr-3">RISK ALLELE</th>
-                            <th className="text-left py-3 pr-3">STUDY ID</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {gwasData.associations.slice(0, 20).map((a, idx) => (
-                            <tr key={idx} className="border-b border-slate-900/60 hover:bg-slate-900/20 transition-all">
-                              <td className="py-3 pr-3 text-slate-200 font-medium">{a.trait}</td>
-                              <td className="py-3 pr-3 text-emerald-400 font-mono-code font-bold">{a.pvalue || 'N/A'}</td>
-                              <td className="py-3 pr-3 text-slate-300 font-mono">{a.strongest_allele || 'N/A'}</td>
-                              <td className="py-3 pr-3 text-slate-400 font-mono">{a.study_accession || a.pubmed_id || 'N/A'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 text-slate-500 font-mono text-xs uppercase">
-                      NO GENOME-WIDE ASSOCIATIONS RECORDED
-                    </div>
-                  )}
-                </HUDFrame>
-
-                {/* RSID To Disease Mapper Panel */}
-                {gwasData.rs_id && (
-                  <HUDFrame title="RSID DISEASE MAPPING // REVERSE LOOKUP" variant="cyan" className="neon-glow-cyan">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
-                          Query RSID for Disease Associations:
-                        </span>
-                        <span className="px-2.5 py-0.5 text-[10px] font-bold rounded bg-cyan-950/40 text-cyan-400 border border-cyan-500/30 font-mono">
-                          {gwasData.rs_id}
-                        </span>
-                      </div>
-
+                    {gwasData.rs_id && (
                       <button
-                        onClick={() => handleRsidLookup(gwasData.rs_id)}
-                        disabled={rsidLoading || selectedRsid === gwasData.rs_id}
-                        className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-900/30 text-slate-950 font-bold px-4 py-2 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 text-xs tracking-widest font-display btn-neon shadow-[0_0_15px_rgba(0,240,255,0.2)]"
+                        onClick={handleComprehensiveDisease}
+                        disabled={compLoading}
+                        className="bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-900/30 text-slate-950 font-bold px-6 py-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs tracking-widest font-display btn-neon shadow-[0_0_15px_rgba(0,240,255,0.2)]"
                       >
-                        {rsidLoading ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                            SEARCHING DISEASES...
-                          </>
+                        {compLoading ? (
+                          <><Loader2 className="w-4 h-4 animate-spin text-slate-950" />QUERYING ALL DATABASES...</>
                         ) : (
-                          <>
-                            <Database className="w-4 h-4 text-slate-950" />
-                            LOOKUP DISEASES FOR THIS RSID
-                          </>
+                          <><Network className="w-4 h-4 text-slate-950" />FIND ALL DISEASE ASSOCIATIONS</>
                         )}
                       </button>
+                    )}
+                    {!gwasData.rs_id && (
+                      <div className="text-xs font-mono text-amber-400 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4" />
+                        No rsID resolved for this variant. Disease lookup requires a known rsID.
+                      </div>
+                    )}
+                  </div>
+                </HUDFrame>
 
-                      {rsidError && (
-                        <div className="flex items-start gap-3 p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-lg text-xs font-mono">
-                          <AlertTriangle className="w-5 h-5 shrink-0 text-red-400" />
-                          <div>{rsidError}</div>
+                {/* Informative message when rsID not found */}
+                {!gwasData.rs_id && (
+                  <div className="mb-6 p-4 bg-amber-950/30 border border-amber-500/30 rounded-lg space-y-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <div className="font-bold text-amber-400 text-xs uppercase tracking-wider">
+                          rsID Not Found - Variant Not in GWAS Catalog
                         </div>
-                      )}
-
-                      {rsidDiseases && selectedRsid === gwasData.rs_id && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="space-y-3 mt-4"
-                        >
-                          {rsidDiseases.result?.diseases && rsidDiseases.result.diseases.length > 0 ? (
-                            <>
-                              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono mb-3">
-                                Found {rsidDiseases.result.diseases.length} Disease Associations:
-                              </div>
-                              <div className="space-y-2 max-h-96 overflow-y-auto">
-                                {rsidDiseases.result.diseases.map((disease, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="p-3 bg-slate-950/40 border border-cyan-500/20 rounded-lg hover:border-cyan-500/50 hover:bg-slate-950/60 transition-all cursor-pointer"
-                                  >
-                                    <div className="flex justify-between items-start gap-2 mb-1">
-                                      <span className="text-xs font-mono text-cyan-400 font-bold truncate flex-1">
-                                        {disease.disease || disease.diseaseTrait || 'Unknown Disease'}
-                                      </span>
-                                      {disease.clinical_significance && (
-                                        <span className="text-[9px] bg-slate-900/60 text-slate-300 px-1.5 py-0.5 rounded font-mono whitespace-nowrap">
-                                          {disease.clinical_significance}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {disease.gene && (
-                                      <div className="text-[9px] text-slate-400">
-                                        Gene: <span className="text-emerald-400 font-mono">{disease.gene}</span>
-                                      </div>
-                                    )}
-                                    {disease.source && (
-                                      <div className="text-[8px] text-slate-500 mt-1">
-                                        Source: {disease.source}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-
-                              {rsidDiseases.result.summary && (
-                                <div className="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-lg mt-4">
-                                  <div className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider mb-2">Summary</div>
-                                  <div className="text-[9px] text-slate-300 space-y-1 font-mono">
-                                    <div>Total Associations: {rsidDiseases.result.summary.total_associations || rsidDiseases.result.diseases.length}</div>
-                                    {rsidDiseases.result.summary.genes_involved && rsidDiseases.result.summary.genes_involved.length > 0 && (
-                                      <div>Genes: {rsidDiseases.result.summary.genes_involved.join(', ')}</div>
-                                    )}
-                                    {rsidDiseases.result.summary.clinical_significances && rsidDiseases.result.summary.clinical_significances.length > 0 && (
-                                      <div>Clinical Significances: {rsidDiseases.result.summary.clinical_significances.join(', ')}</div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <div className="text-center py-4 text-slate-500 font-mono text-xs uppercase">
-                              NO DISEASE ASSOCIATIONS FOUND FOR THIS RSID
-                            </div>
-                          )}
-                        </motion.div>
-                      )}
+                        <div className="text-[11px] text-slate-300 leading-relaxed">
+                          <strong>Why:</strong> GWAS Catalog contains only <strong>common population variants</strong> (MAF &gt; 1%). 
+                          This variant is likely <strong>rare or familial</strong> and doesn&apos;t have a public rsID.
+                        </div>
+                        <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
+                          <strong>For rare pathogenic variants:</strong> See the <strong>Gene Variant module</strong> for ClinVar 
+                          clinical significance, or search <strong>medical literature</strong> for specific allele-disease evidence.
+                        </div>
+                        <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
+                          <strong>To test GWAS:</strong> Try common variants like LDLR (1:55505647:G:A) or APOE (19:44919406:G:A).
+                        </div>
+                      </div>
                     </div>
-                  </HUDFrame>
+                  </div>
+                )}
+
+                {/* ── COMPREHENSIVE DISEASE ASSOCIATIONS ── */}
+                {comprehensiveDisease && (
+                  <>
+                    {/* Variant Summary with Copyable RSID */}
+                    <HUDFrame variant="cyan" className="neon-glow-cyan">
+                      <div className="flex flex-col md:flex-row justify-between gap-6">
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-lg font-mono font-bold text-slate-100 neon-text-cyan">
+                              {comprehensiveDisease.variant_display}
+                            </span>
+                            {comprehensiveDisease.resolved_rsid && (
+                              <button
+                                onClick={() => copyToClipboard(comprehensiveDisease.resolved_rsid)}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-cyan-950/50 border border-cyan-500/50 rounded-lg hover:border-cyan-400 transition-all group"
+                                title="Click to copy RSID"
+                              >
+                                <span className="text-sm font-mono font-bold text-cyan-400">{comprehensiveDisease.resolved_rsid}</span>
+                                {copySuccess ? <CheckCircle2 className="w-3.5 h-3.5 text-cyan-300" /> : <Copy className="w-3.5 h-3.5 text-cyan-500 group-hover:text-cyan-300" />}
+                              </button>
+                            )}
+                            {copySuccess && <span className="text-[10px] text-cyan-400 font-mono animate-pulse">COPIED!</span>}
+                          </div>
+                          <div className="text-xs font-mono text-slate-400">
+                            Gene: <strong className="text-cyan-400">{comprehensiveDisease.gene_info?.gene_symbol || 'N/A'}</strong>
+                          </div>
+                        </div>
+                        <div className="md:text-right">
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">Total Associations</span>
+                          <div className="text-2xl font-bold text-cyan-400">{comprehensiveDisease.source_counts?.total_associations || 0}</div>
+                        </div>
+                      </div>
+                    </HUDFrame>
+
+                    {/* Disease Associations */}
+                    <HUDFrame title="DISEASE ASSOCIATIONS // MULTI-SOURCE" variant="green">
+                      {comprehensiveDisease.disease_associations?.length > 0 ? (
+                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                          {comprehensiveDisease.disease_associations.map((d, idx) => (
+                            <div key={idx} className="p-3 bg-slate-950/40 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition-all">
+                              <div className="flex justify-between items-start gap-2">
+                                <div>
+                                  <span className="text-xs font-mono text-emerald-400 font-bold">{d.disease}</span>
+                                  {d.gene && <div className="text-[9px] text-slate-400 mt-1">Gene: <span className="text-emerald-300">{d.gene}</span></div>}
+                                </div>
+                                <div className="flex flex-col items-end gap-1">
+                                  <span className="text-[9px] bg-slate-900/60 text-slate-300 px-2 py-0.5 rounded font-mono">{d.source}</span>
+                                  {d.pvalue && <span className="text-[9px] text-emerald-400 font-mono">p={d.pvalue}</span>}
+                                </div>
+                              </div>
+                              {d.clinical_significance && d.clinical_significance !== 'Not Available' && (
+                                <div className="text-[9px] text-slate-400 mt-1">Clinical: <span className="text-amber-400">{d.clinical_significance}</span></div>
+                              )}
+                              {d.risk_allele && <div className="text-[9px] text-slate-500 mt-0.5">Risk Allele: {d.risk_allele}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-6 text-slate-500 font-mono text-xs uppercase">No disease associations found across any source</div>
+                      )}
+                    </HUDFrame>
+
+                    {/* Clinical Significance (ClinVar) */}
+                    <HUDFrame title="CLINICAL SIGNIFICANCE // CLINVAR" variant="purple">
+                      <div className="space-y-3">
+                        <div className="data-cell">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">SIGNIFICANCE</span>
+                          <span className="text-sm font-mono font-bold text-amber-400">{comprehensiveDisease.clinical_significance || 'Not Available'}</span>
+                        </div>
+                        <div className="data-cell">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">CONDITIONS ({comprehensiveDisease.source_counts?.clinvar_conditions || 0})</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {comprehensiveDisease.disease_associations?.filter(d => d.source === 'ClinVar').map((d, idx) => (
+                              <span key={idx} className="text-[10px] font-mono bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded border border-purple-500/20">{d.disease}</span>
+                            ))}
+                            {(!comprehensiveDisease.disease_associations?.some(d => d.source === 'ClinVar')) && (
+                              <span className="text-[10px] font-mono text-slate-500">No ClinVar conditions mapped</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </HUDFrame>
+
+                    {/* Gene Information & Functional Predictions */}
+                    <HUDFrame title="GENE INFORMATION // FUNCTIONAL IMPACT" variant="cyan">
+                      <div className="space-y-3">
+                        <div className="data-cell flex justify-between">
+                          <span className="text-xs text-slate-400 font-mono">GENE SYMBOL</span>
+                          <span className="text-xs font-mono font-bold text-cyan-400">{comprehensiveDisease.gene_info?.gene_symbol || 'N/A'}</span>
+                        </div>
+                        {comprehensiveDisease.gene_info?.full_name && (
+                          <div className="data-cell">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">FULL NAME</span>
+                            <span className="block text-xs text-slate-300 mt-1">{comprehensiveDisease.gene_info.full_name}</span>
+                          </div>
+                        )}
+                        {comprehensiveDisease.gene_info?.description && (
+                          <div className="data-cell">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest font-mono">GENE SUMMARY</span>
+                            <span className="block text-[11px] text-slate-400 mt-1 leading-relaxed">{comprehensiveDisease.gene_info.description}</span>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="data-cell flex justify-between">
+                            <span className="text-xs text-slate-400 font-mono">SIFT</span>
+                            <span className="text-xs font-mono font-bold text-slate-200">{comprehensiveDisease.gene_info?.sift_prediction || 'N/A'}</span>
+                          </div>
+                          <div className="data-cell flex justify-between">
+                            <span className="text-xs text-slate-400 font-mono">POLYPHEN</span>
+                            <span className="text-xs font-mono font-bold text-slate-200">{comprehensiveDisease.gene_info?.polyphen_prediction || 'N/A'}</span>
+                          </div>
+                          <div className="data-cell flex justify-between">
+                            <span className="text-xs text-slate-400 font-mono">AA CHANGE</span>
+                            <span className="text-xs font-mono font-bold text-cyan-400">{comprehensiveDisease.gene_info?.amino_acid_change || 'N/A'}</span>
+                          </div>
+                          <div className="data-cell flex justify-between">
+                            <span className="text-xs text-slate-400 font-mono">IMPACT</span>
+                            {comprehensiveDisease.gene_info?.impact_level && getImpactBadge(comprehensiveDisease.gene_info.impact_level)}
+                          </div>
+                        </div>
+                      </div>
+                    </HUDFrame>
+
+                    {/* GWAS Findings Table */}
+                    {comprehensiveDisease.gwas_findings?.length > 0 && (
+                      <HUDFrame title="GWAS CATALOG FINDINGS" variant="green">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs font-mono">
+                            <thead>
+                              <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
+                                <th className="text-left py-3 pr-3">TRAIT / DISEASE</th>
+                                <th className="text-left py-3 pr-3">P-VALUE</th>
+                                <th className="text-left py-3 pr-3">RISK ALLELE</th>
+                                <th className="text-left py-3 pr-3">GENE</th>
+                                <th className="text-left py-3 pr-3">STUDY</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {comprehensiveDisease.gwas_findings.map((g, idx) => (
+                                <tr key={idx} className="border-b border-slate-900/60 hover:bg-slate-900/20 transition-all">
+                                  <td className="py-3 pr-3 text-slate-200 font-medium">{g.disease}</td>
+                                  <td className="py-3 pr-3 text-emerald-400 font-mono-code font-bold">{g.pvalue || 'N/A'}</td>
+                                  <td className="py-3 pr-3 text-slate-300 font-mono">{g.risk_allele || 'N/A'}</td>
+                                  <td className="py-3 pr-3 text-emerald-300">{g.gene || 'N/A'}</td>
+                                  <td className="py-3 pr-3 text-slate-400">
+                                    {g.pubmed_id ? (
+                                      <a href={`https://pubmed.ncbi.nlm.nih.gov/${g.pubmed_id}/`} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
+                                        {g.pubmed_id} <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    ) : (g.study_id || 'N/A')}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </HUDFrame>
+                    )}
+
+                    {/* Publications (PubMed) */}
+                    <HUDFrame title="RELATED PUBLICATIONS // PUBMED" variant="blue">
+                      {comprehensiveDisease.publications?.length > 0 ? (
+                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                          {comprehensiveDisease.publications.map((pub, idx) => (
+                            <div key={idx} className="p-3 bg-slate-950/40 border border-blue-500/20 rounded-lg hover:border-blue-500/40 transition-all">
+                              <a href={pub.url} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-blue-400 hover:text-blue-300 font-medium flex items-start gap-1">
+                                {pub.title} <ExternalLink className="w-3 h-3 mt-0.5 shrink-0" />
+                              </a>
+                              <div className="text-[9px] text-slate-500 mt-1">{pub.authors}</div>
+                              <div className="text-[9px] text-slate-400 mt-0.5 italic">{pub.journal} ({pub.year})</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-6 text-slate-500 font-mono text-xs uppercase">No publications found</div>
+                      )}
+                    </HUDFrame>
+                  </>
+                )}
+
+                {/* Prompt when no comprehensive data yet but rsID available */}
+                {gwasData?.rs_id && !comprehensiveDisease && !compLoading && !compError && (
+                  <div className="text-center py-8 text-slate-500 font-mono text-xs">
+                    <Database className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    Click &quot;FIND ALL DISEASE ASSOCIATIONS&quot; above to query ClinVar, GWAS Catalog, and PubMed
+                  </div>
+                )}
+
+                {compError && (
+                  <div className="flex items-start gap-3 p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-lg text-xs font-mono">
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <div>{compError}</div>
+                  </div>
                 )}
                 </>
               )}
 
             </div>
           )}
+
+          {/* RSID Search module removed - functionality merged into Disease Associations module */}
+
 
           {activeModule === 'drugs' && (
             <div className="flex flex-col gap-6">
