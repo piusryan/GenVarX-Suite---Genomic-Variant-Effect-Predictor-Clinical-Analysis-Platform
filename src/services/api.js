@@ -36,6 +36,55 @@ export const fetchGwasAssociations = async (variantString) => {
   }
 };
 
+export const gwasDatasetAnalysis = async (variantString) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/api/gwas/dataset-analysis`, {
+      variant: variantString,
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Dataset analysis failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
+
+export const getDiseaseAssociations = async (variantString) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/api/disease-associations`, {
+      variant: variantString,
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Disease association lookup failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
+
+export const getDatasetsSummary = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/api/datasets/summary`);
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Failed to get datasets summary.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
+
 export const searchCompounds = async (query, limit = 20) => {
   try {
     const response = await axios.get(`${API_BASE_URL}/api/compounds`, {

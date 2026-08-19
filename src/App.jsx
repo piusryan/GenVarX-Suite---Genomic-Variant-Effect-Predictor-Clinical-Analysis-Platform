@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { annotateVariant, fetchGwasAssociations, searchCompounds, getCompound } from './services/api';
+import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound } from './services/api';
 import { Dna, Search, AlertTriangle, Activity, ShieldAlert, Loader2, Database, Pill, Network, Terminal, Shield, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import VariantVisualizer from './components/VariantVisualizer';
@@ -18,6 +18,8 @@ export default function App() {
   const [gwasLoading, setGwasLoading] = useState(false);
   const [gwasData, setGwasData] = useState(null);
   const [gwasError, setGwasError] = useState(null);
+  const [datasetAnalysis, setDatasetAnalysis] = useState(null);
+  const [diseaseAssoc, setDiseaseAssoc] = useState(null);
 
   const [compoundQuery, setCompoundQuery] = useState('selinexor');
   const [compoundLoading, setCompoundLoading] = useState(false);
@@ -60,11 +62,19 @@ export default function App() {
     setGwasLoading(true);
     setGwasError(null);
     try {
-      const result = await fetchGwasAssociations(gwasInput.trim());
-      setGwasData(result);
+      const [gwasResult, analysis, diseaseResult] = await Promise.all([
+        fetchGwasAssociations(gwasInput.trim()),
+        gwasDatasetAnalysis(gwasInput.trim()),
+        getDiseaseAssociations(gwasInput.trim())
+      ]);
+      setGwasData(gwasResult);
+      setDatasetAnalysis(analysis);
+      setDiseaseAssoc(diseaseResult);
     } catch (err) {
       setGwasError(err.message);
       setGwasData(null);
+      setDatasetAnalysis(null);
+      setDiseaseAssoc(null);
     } finally {
       setGwasLoading(false);
     }
@@ -303,30 +313,50 @@ export default function App() {
                   </div>
                 </form>
 
-                {/* Preset hotkeys */}
-                <div className="flex flex-wrap items-center gap-2 mt-4 text-[10px] font-mono text-slate-500">
-                  <span className="uppercase tracking-widest">Presets:</span>
-                  <button
-                    type="button"
-                    onClick={() => { setVariantInput('17:43044295:G:A'); }}
-                    className="hover:text-cyan-400 transition font-mono hover:underline uppercase bg-slate-950/40 border border-slate-850 px-2 py-0.5 rounded"
-                  >
-                    BRCA1 (Breast cancer)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setVariantInput('13:32316462:G:A'); }}
-                    className="hover:text-cyan-400 transition font-mono hover:underline uppercase bg-slate-950/40 border border-slate-850 px-2 py-0.5 rounded"
-                  >
-                    BRCA2 (Ovarian cancer)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setVariantInput('17:7673802:C:T'); }}
-                    className="hover:text-cyan-400 transition font-mono hover:underline uppercase bg-slate-950/40 border border-slate-850 px-2 py-0.5 rounded"
-                  >
-                    TP53 (Tumor Suppressor)
-                  </button>
+                {/* Preset hotkeys - EXPANDED */}
+                <div className="space-y-3 mt-4">
+                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Preset Variants:</div>
+                  
+                  {/* Cancer Risk Category */}
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔴 High Risk (Hereditary Cancer)</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setVariantInput('17:43044295:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRCA1 (Breast)</button>
+                      <button type="button" onClick={() => { setVariantInput('13:32316462:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRCA2 (Ovarian)</button>
+                      <button type="button" onClick={() => { setVariantInput('17:7673802:C:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">TP53 (Li-Fraumeni)</button>
+                      <button type="button" onClick={() => { setVariantInput('2:212245402:C:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">PTEN (Cowden)</button>
+                    </div>
+                  </div>
+
+                  {/* Moderate Risk Category */}
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟠 Moderate Risk (Cancer Predisposition)</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setVariantInput('7:55249071:T:G'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">EGFR (Lung)</button>
+                      <button type="button" onClick={() => { setVariantInput('12:25398284:C:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">KRAS (Pancreas)</button>
+                      <button type="button" onClick={() => { setVariantInput('5:112839461:T:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">APC (Colon)</button>
+                      <button type="button" onClick={() => { setVariantInput('7:140753336:A:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">BRAF (Melanoma)</button>
+                    </div>
+                  </div>
+
+                  {/* Cardiovascular Category */}
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔵 Cardiovascular / Metabolic</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setVariantInput('1:55505647:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">LDLR (Cholesterol)</button>
+                      <button type="button" onClick={() => { setVariantInput('19:44919406:G:A'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">APOE (Heart Disease)</button>
+                      <button type="button" onClick={() => { setVariantInput('7:127387562:C:T'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">GCK (Diabetes)</button>
+                    </div>
+                  </div>
+
+                  {/* Neurological Category */}
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟣 Neurological / Psychiatric</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setVariantInput('4:38767700:T:C'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">HTT (Huntington)</button>
+                      <button type="button" onClick={() => { setVariantInput('19:50958929:T:C'); }} className="hover:text-cyan-400 transition font-mono hover:underline uppercase text-[9px] bg-purple-950/40 border border-purple-500/20 px-2 py-1 rounded hover:border-purple-500/40">PSEN1 (Alzheimer)</button>
+                    </div>
+                  </div>
                 </div>
               </HUDFrame>
 
@@ -477,6 +507,32 @@ export default function App() {
                     </button>
                   </div>
                 </form>
+
+                {/* GWAS Preset variants with known GWAS data */}
+                <div className="space-y-3 mt-4">
+                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Test Presets (Common Variants with GWAS Data):</div>
+                  
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔵 Metabolic / Cardiovascular</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setGwasInput('1:55505647:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">LDLR Cholesterol</button>
+                      <button type="button" onClick={() => { setGwasInput('19:44919406:G:A'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">APOE Heart Disease</button>
+                      <button type="button" onClick={() => { setGwasInput('7:127387562:C:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">GCK Type 2 Diabetes</button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">📊 Population Variants</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setGwasInput('11:116414097:C:T'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-slate-950/40 border border-slate-500/20 px-2 py-1 rounded hover:border-slate-500/40">rs1333049 CAD</button>
+                      <button type="button" onClick={() => { setGwasInput('10:114758349:T:C'); }} className="hover:text-emerald-400 transition font-mono hover:underline uppercase text-[9px] bg-slate-950/40 border border-slate-500/20 px-2 py-1 rounded hover:border-slate-500/40">rs1441675 BMI</button>
+                    </div>
+                  </div>
+
+                  <div className="text-[8px] text-slate-500 mt-3 font-mono-code">
+                    💡 These presets have public rsIDs and GWAS Catalog entries. Rare variants (like BRCA1) won't show GWAS data.
+                  </div>
+                </div>
               </HUDFrame>
 
               {/* GWAS error */}
@@ -494,6 +550,69 @@ export default function App() {
                 )}
               </AnimatePresence>
 
+              {/* Dataset Analysis Diagnostic */}
+              {datasetAnalysis && (
+                <HUDFrame title="DATASET ANALYSIS & DIAGNOSTICS" variant="blue" className="neon-glow-blue">
+                  <div className="space-y-4">
+                    {/* Input & VEP Extraction */}
+                    <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-3">VEP Extraction Results</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] font-mono">
+                        <div><span className="text-slate-500">Input Variant:</span> <span className="text-slate-200 font-bold">{datasetAnalysis.variant}</span></div>
+                        <div><span className="text-slate-500">Resolved rsID:</span> <span className={datasetAnalysis.vep_extraction.rs_id ? "text-emerald-400 font-bold" : "text-amber-400"}>{datasetAnalysis.vep_extraction.rs_id || 'NOT FOUND'}</span></div>
+                        <div><span className="text-slate-500">Gene:</span> <span className="text-slate-200">{datasetAnalysis.vep_extraction.gene_symbol || 'N/A'}</span></div>
+                        <div><span className="text-slate-500">Consequence:</span> <span className="text-slate-200">{datasetAnalysis.vep_extraction.consequence || 'N/A'}</span></div>
+                        <div className="md:col-span-2"><span className="text-slate-500">Clinical Significance:</span> <span className="text-slate-200">{datasetAnalysis.vep_extraction.clinical_significance || 'N/A'}</span></div>
+                      </div>
+                    </div>
+
+                    {/* GWAS Catalog Status */}
+                    <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2">GWAS Catalog Status</div>
+                      <div className="text-[11px] font-mono space-y-1">
+                        <div>
+                          <span className="text-slate-500">Status:</span> 
+                          {datasetAnalysis.gwas_catalog_status.found ? (
+                            <span className="text-emerald-400 font-bold ml-2">✓ FOUND</span>
+                          ) : (
+                            <span className="text-amber-400 font-bold ml-2">✗ NOT FOUND</span>
+                          )}
+                        </div>
+                        <div><span className="text-slate-500">Associations Found:</span> <span className="text-slate-200 font-bold">{datasetAnalysis.gwas_catalog_status.count}</span></div>
+                      </div>
+                    </div>
+
+                    {/* Local Datasets Available */}
+                    <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2">Local Datasets Available</div>
+                      <div className="text-[11px] font-mono space-y-1">
+                        {Object.keys(datasetAnalysis.local_datasets).length > 0 ? (
+                          Object.entries(datasetAnalysis.local_datasets).map(([name, info]) => (
+                            <div key={name} className="text-slate-300">
+                              <span className="text-blue-300 font-bold">📁 {name}</span>
+                              <span className="text-slate-500 ml-2">({info.file_count} files)</span>
+                              <div className="text-[9px] text-slate-400 ml-4 mt-1">
+                                {info.files.slice(0, 3).map(f => `• ${f}`).join(' | ')}
+                                {info.files.length > 3 && ` + ${info.files.length - 3} more`}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-slate-400">No local datasets found</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Diagnostic Message */}
+                    <div className="bg-slate-950/60 border border-blue-600/30 rounded-lg p-3">
+                      <div className="text-[11px] font-mono text-slate-300">
+                        <span className="text-blue-400 font-bold">Diagnostic:</span> {datasetAnalysis.diagnostic_message}
+                      </div>
+                    </div>
+                  </div>
+                </HUDFrame>
+              )}
+
               {/* GWAS associations table */}
               {gwasData && (
                 <HUDFrame title="GWAS PHENOTYPIC INDEX" variant="green" className="neon-glow-green">
@@ -502,8 +621,34 @@ export default function App() {
                       <Database className="w-4 h-4 text-emerald-400" />
                       <span>RESOLVED RSID: <span className="font-bold text-slate-200">{gwasData.rs_id || 'N/A'}</span></span>
                     </div>
-                    {gwasData.note && <span className="text-slate-500">{gwasData.note}</span>}
                   </div>
+
+                  {/* Informative message when rsID not found */}
+                  {!gwasData.rs_id && (
+                    <div className="mb-6 p-4 bg-amber-950/30 border border-amber-500/30 rounded-lg space-y-2">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <div className="font-bold text-amber-400 text-xs uppercase tracking-wider">
+                            rsID Not Found - Variant Not in GWAS Catalog
+                          </div>
+                          <div className="text-[11px] text-slate-300 leading-relaxed">
+                            <strong>Why:</strong> GWAS Catalog contains only <strong>common population variants</strong> (MAF &gt; 1%). 
+                            This variant is likely <strong>rare or familial</strong> and doesn't have a public rsID.
+                          </div>
+                          <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
+                            <strong>For rare pathogenic variants:</strong> See the <strong>Gene Variant module</strong> for ClinVar 
+                            clinical significance, or search <strong>medical literature</strong> for specific allele-disease evidence.
+                          </div>
+                          <div className="text-[11px] text-slate-400 leading-relaxed mt-2">
+                            <strong>To test GWAS:</strong> Try common variants like LDLR (1:55505647:G:A) or APOE (19:44919406:G:A).
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {gwasData.note && gwasData.rs_id && <span className="text-slate-500 text-xs mb-4 block">{gwasData.note}</span>}
 
                   {gwasData.associations && gwasData.associations.length > 0 ? (
                     <div className="overflow-x-auto">
@@ -542,11 +687,10 @@ export default function App() {
           {activeModule === 'drugs' && (
             <div className="flex flex-col gap-6">
               
-              {/* Drug Search */}
               <HUDFrame title="CHEMBL COMPOUND SEARCH" variant="purple" className="neon-glow-purple">
                 <form onSubmit={handleCompoundSearch} className="space-y-4">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
-                    Search compound database:
+                    Search compound database (by name, ID, or target):
                   </div>
                   <div className="flex flex-col sm:flex-row gap-3">
                     <div className="relative flex-1">
@@ -571,6 +715,51 @@ export default function App() {
                       )}
                       QUERY CHEMICALS
                     </button>
+                  </div>
+
+                  {/* Drug Query Presets */}
+                  <div className="space-y-3 pt-2 border-t border-slate-800">
+                    <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Quick Queries:</div>
+                    
+                    {/* Cancer Therapeutics */}
+                    <div className="space-y-2">
+                      <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔴 Cancer Therapeutics</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => { setCompoundQuery('selinexor'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">Selinexor (XPO1)</button>
+                        <button type="button" onClick={() => { setCompoundQuery('CHEMBL1201579'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">Trastuzumab (HER2)</button>
+                        <button type="button" onClick={() => { setCompoundQuery('tamoxifen'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">Tamoxifen (ER)</button>
+                        <button type="button" onClick={() => { setCompoundQuery('paclitaxel'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">Paclitaxel (Tubulin)</button>
+                      </div>
+                    </div>
+
+                    {/* Targeted Therapy */}
+                    <div className="space-y-2">
+                      <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🎯 Targeted Therapy</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => { setCompoundQuery('EGFR inhibitor'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">EGFR Inhibitors</button>
+                        <button type="button" onClick={() => { setCompoundQuery('kinase inhibitor'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">Kinase Inhibitors</button>
+                        <button type="button" onClick={() => { setCompoundQuery('checkpoint inhibitor'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">Checkpoint Inhibitors</button>
+                      </div>
+                    </div>
+
+                    {/* Cardiovascular */}
+                    <div className="space-y-2">
+                      <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🔵 Cardiovascular</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => { setCompoundQuery('statin'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">Statins (Cholesterol)</button>
+                        <button type="button" onClick={() => { setCompoundQuery('ACE inhibitor'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">ACE Inhibitors</button>
+                        <button type="button" onClick={() => { setCompoundQuery('beta blocker'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-blue-950/40 border border-blue-500/20 px-2 py-1 rounded hover:border-blue-500/40">Beta Blockers</button>
+                      </div>
+                    </div>
+
+                    {/* Antibiotic/Antimicrobial */}
+                    <div className="space-y-2">
+                      <div className="text-[9px] font-bold text-slate-600 uppercase tracking-wider ml-1">🟢 Antibiotics</div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => { setCompoundQuery('penicillin'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-green-950/40 border border-green-500/20 px-2 py-1 rounded hover:border-green-500/40">Penicillins</button>
+                        <button type="button" onClick={() => { setCompoundQuery('fluoroquinolone'); }} className="hover:text-purple-400 transition font-mono text-[9px] bg-green-950/40 border border-green-500/20 px-2 py-1 rounded hover:border-green-500/40">Fluoroquinolones</button>
+                      </div>
+                    </div>
                   </div>
                 </form>
               </HUDFrame>
