@@ -1,0 +1,255 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════
+   GENVARX CLINICAL BIOMETRICS ENV — DESIGN SYSTEM
+   ═══════════════════════════════════════════════════ */
+
+:root {
+  /* ─── Medical Slate Palette (Clean, Professional) ─── */
+  --medical-teal: #0ea5e9;    /* Clean tech blue */
+  --medical-cyan: #06b6d4;    /* Tech cyan */
+  --medical-steel: #64748b;   /* Professional slate */
+  --medical-green: #10b981;   /* Clinical positive */
+  --medical-amber: #f59e0b;   /* Clinical caution */
+  --medical-red: #ef4444;     /* Clinical alert */
+
+  /* ─── Surface Colors ─── */
+  --surface-base: #0b0f19;    /* Deep clinical dark */
+  --surface-panel: rgba(15, 23, 42, 0.75); /* Clean glass slate */
+  --surface-card: #131c2e;    /* Dark card background */
+  --surface-hover: rgba(14, 165, 233, 0.05);
+
+  /* ─── Borders ─── */
+  --border-dim: rgba(148, 163, 184, 0.1);
+  --border-default: rgba(14, 165, 233, 0.15);
+  --border-active: rgba(14, 165, 233, 0.4);
+
+  /* ─── Fonts ─── */
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-body);
+  background: var(--surface-base);
+  color: #f1f5f9;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Subtle Medical Dot Grid Background ─── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-color: var(--surface-base);
+  background-image: radial-gradient(rgba(14, 165, 233, 0.06) 1.5px, transparent 1.5px);
+  background-size: 24px 24px;
+  pointer-events: none;
+}
+
+/* ─── Soft Ambient Lighting ─── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% -20%, rgba(14, 165, 233, 0.08) 0%, transparent 60%);
+}
+
+/* ═══════════════════════════════════════
+   SCROLLBAR
+   ═══════════════════════════════════════ */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(14, 165, 233, 0.25);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(14, 165, 233, 0.45);
+}
+
+/* ═══════════════════════════════════════
+   CLINICAL INSTRUMENTATION CORNERS
+   ═══════════════════════════════════════ */
+.hud-frame {
+  position: relative;
+}
+.hud-frame::before,
+.hud-frame::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  z-index: 2;
+}
+.hud-frame::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1.5px solid var(--medical-teal);
+  border-left: 1.5px solid var(--medical-teal);
+  opacity: 0.8;
+}
+.hud-frame::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1.5px solid var(--medical-teal);
+  border-right: 1.5px solid var(--medical-teal);
+  opacity: 0.8;
+}
+
+.hud-frame-alt::before {
+  border-color: var(--medical-cyan);
+}
+.hud-frame-alt::after {
+  border-color: var(--medical-cyan);
+}
+
+.hud-frame-green::before {
+  border-color: var(--medical-green);
+}
+.hud-frame-green::after {
+  border-color: var(--medical-green);
+}
+
+.hud-frame-purple::before {
+  border-color: var(--medical-steel);
+}
+.hud-frame-purple::after {
+  border-color: var(--medical-steel);
+}
+
+/* ═══════════════════════════════════════
+   SLEEK PROFESSIONAL PANELS
+   ═══════════════════════════════════════ */
+.glass-panel {
+  background: var(--surface-panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+.glass-panel:hover {
+  border-color: var(--border-active);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.glass-panel-solid {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+
+/* ═══════════════════════════════════════
+   LIGHT GLOWS (SUBTLE / PROFESSIONAL)
+   ═══════════════════════════════════════ */
+.neon-glow-cyan {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.neon-glow-magenta {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.neon-glow-green {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.neon-text-cyan {
+  color: var(--medical-teal);
+}
+.neon-text-magenta {
+  color: var(--medical-cyan);
+}
+.neon-text-green {
+  color: var(--medical-green);
+}
+
+/* ═══════════════════════════════════════
+   ANIMATIONS (MINIMAL / DECENT)
+   ═══════════════════════════════════════ */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes spin-slow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2.5s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 16s linear infinite;
+}
+
+/* ═══════════════════════════════════════
+   TYPOGRAPHY
+   ═══════════════════════════════════════ */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+.font-mono-code {
+  font-family: var(--font-mono);
+}
+
+/* ═══════════════════════════════════════
+   STATUS INDICATORS
+   ═══════════════════════════════════════ */
+.status-dot {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.status-online {
+  background: var(--medical-green);
+}
+.status-warning {
+  background: var(--medical-amber);
+}
+.status-error {
+  background: var(--medical-red);
+}
+
+/* ═══════════════════════════════════════
+   DATA ENTRIES
+   ═══════════════════════════════════════ */
+.data-cell {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 10px 14px;
+  transition: all 0.2s ease;
+}
+.data-cell:hover {
+  border-color: var(--border-default);
+  background: rgba(15, 23, 42, 0.85);
+}
+
+input:focus, textarea:focus {
+  border-color: var(--medical-teal) !important;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15) !important;
+}

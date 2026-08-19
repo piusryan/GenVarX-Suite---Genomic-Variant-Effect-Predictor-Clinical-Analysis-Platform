@@ -1,0 +1,11 @@
+# Python tracking ignores
+genvarx-backend/venv/
+genvarx-backend/__pycache__/
+genvarx-backend/history_log.json
+*.pyc
+
+# React tracking ignores
+genvarx-frontend/node_modules/
+genvarx-frontend/dist/
+.env
+.DS_Store
