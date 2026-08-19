@@ -116,3 +116,18 @@ export const getCompound = async (chemblId) => {
     }
   }
 };
+
+export const getDiseasesByRsid = async (rsid) => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/api/rsid-to-disease/${rsid}`);
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'RSID disease lookup failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};

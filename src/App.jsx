@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound } from './services/api';
+import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound, getDiseasesByRsid } from './services/api';
 import { Dna, Search, AlertTriangle, Activity, ShieldAlert, Loader2, Database, Pill, Network, Terminal, Shield, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import VariantVisualizer from './components/VariantVisualizer';
@@ -20,6 +20,12 @@ export default function App() {
   const [gwasError, setGwasError] = useState(null);
   const [datasetAnalysis, setDatasetAnalysis] = useState(null);
   const [diseaseAssoc, setDiseaseAssoc] = useState(null);
+  
+  // RSID lookup state
+  const [selectedRsid, setSelectedRsid] = useState(null);
+  const [rsidDiseases, setRsidDiseases] = useState(null);
+  const [rsidLoading, setRsidLoading] = useState(false);
+  const [rsidError, setRsidError] = useState(null);
 
   const [compoundQuery, setCompoundQuery] = useState('selinexor');
   const [compoundLoading, setCompoundLoading] = useState(false);
@@ -77,6 +83,21 @@ export default function App() {
       setDiseaseAssoc(null);
     } finally {
       setGwasLoading(false);
+    }
+  };
+
+  const handleRsidLookup = async (rsid) => {
+    setSelectedRsid(rsid);
+    setRsidLoading(true);
+    setRsidError(null);
+    try {
+      const result = await getDiseasesByRsid(rsid);
+      setRsidDiseases(result);
+    } catch (err) {
+      setRsidError(err.message);
+      setRsidDiseases(null);
+    } finally {
+      setRsidLoading(false);
     }
   };
 
@@ -615,7 +636,8 @@ export default function App() {
 
               {/* GWAS associations table */}
               {gwasData && (
-                <HUDFrame title="GWAS PHENOTYPIC INDEX" variant="green" className="neon-glow-green">
+                <>
+                  <HUDFrame title="GWAS PHENOTYPIC INDEX" variant="green" className="neon-glow-green">
                   <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6 font-mono text-xs text-slate-400 border-b border-slate-900 pb-3">
                     <div className="flex items-center gap-2">
                       <Database className="w-4 h-4 text-emerald-400" />
@@ -679,6 +701,112 @@ export default function App() {
                     </div>
                   )}
                 </HUDFrame>
+
+                {/* RSID To Disease Mapper Panel */}
+                {gwasData.rs_id && (
+                  <HUDFrame title="RSID DISEASE MAPPING // REVERSE LOOKUP" variant="cyan" className="neon-glow-cyan">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                          Query RSID for Disease Associations:
+                        </span>
+                        <span className="px-2.5 py-0.5 text-[10px] font-bold rounded bg-cyan-950/40 text-cyan-400 border border-cyan-500/30 font-mono">
+                          {gwasData.rs_id}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => handleRsidLookup(gwasData.rs_id)}
+                        disabled={rsidLoading || selectedRsid === gwasData.rs_id}
+                        className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-900/30 text-slate-950 font-bold px-4 py-2 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 text-xs tracking-widest font-display btn-neon shadow-[0_0_15px_rgba(0,240,255,0.2)]"
+                      >
+                        {rsidLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                            SEARCHING DISEASES...
+                          </>
+                        ) : (
+                          <>
+                            <Database className="w-4 h-4 text-slate-950" />
+                            LOOKUP DISEASES FOR THIS RSID
+                          </>
+                        )}
+                      </button>
+
+                      {rsidError && (
+                        <div className="flex items-start gap-3 p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-lg text-xs font-mono">
+                          <AlertTriangle className="w-5 h-5 shrink-0 text-red-400" />
+                          <div>{rsidError}</div>
+                        </div>
+                      )}
+
+                      {rsidDiseases && selectedRsid === gwasData.rs_id && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="space-y-3 mt-4"
+                        >
+                          {rsidDiseases.result?.diseases && rsidDiseases.result.diseases.length > 0 ? (
+                            <>
+                              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono mb-3">
+                                Found {rsidDiseases.result.diseases.length} Disease Associations:
+                              </div>
+                              <div className="space-y-2 max-h-96 overflow-y-auto">
+                                {rsidDiseases.result.diseases.map((disease, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="p-3 bg-slate-950/40 border border-cyan-500/20 rounded-lg hover:border-cyan-500/50 hover:bg-slate-950/60 transition-all cursor-pointer"
+                                  >
+                                    <div className="flex justify-between items-start gap-2 mb-1">
+                                      <span className="text-xs font-mono text-cyan-400 font-bold truncate flex-1">
+                                        {disease.disease || disease.diseaseTrait || 'Unknown Disease'}
+                                      </span>
+                                      {disease.clinical_significance && (
+                                        <span className="text-[9px] bg-slate-900/60 text-slate-300 px-1.5 py-0.5 rounded font-mono whitespace-nowrap">
+                                          {disease.clinical_significance}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {disease.gene && (
+                                      <div className="text-[9px] text-slate-400">
+                                        Gene: <span className="text-emerald-400 font-mono">{disease.gene}</span>
+                                      </div>
+                                    )}
+                                    {disease.source && (
+                                      <div className="text-[8px] text-slate-500 mt-1">
+                                        Source: {disease.source}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+
+                              {rsidDiseases.result.summary && (
+                                <div className="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-lg mt-4">
+                                  <div className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider mb-2">Summary</div>
+                                  <div className="text-[9px] text-slate-300 space-y-1 font-mono">
+                                    <div>Total Associations: {rsidDiseases.result.summary.total_associations || rsidDiseases.result.diseases.length}</div>
+                                    {rsidDiseases.result.summary.genes_involved && rsidDiseases.result.summary.genes_involved.length > 0 && (
+                                      <div>Genes: {rsidDiseases.result.summary.genes_involved.join(', ')}</div>
+                                    )}
+                                    {rsidDiseases.result.summary.clinical_significances && rsidDiseases.result.summary.clinical_significances.length > 0 && (
+                                      <div>Clinical Significances: {rsidDiseases.result.summary.clinical_significances.join(', ')}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="text-center py-4 text-slate-500 font-mono text-xs uppercase">
+                              NO DISEASE ASSOCIATIONS FOUND FOR THIS RSID
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </div>
+                  </HUDFrame>
+                )}
+                </>
               )}
 
             </div>
