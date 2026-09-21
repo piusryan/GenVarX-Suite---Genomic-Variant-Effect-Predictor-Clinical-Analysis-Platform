@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from typing import List
-from app.models import VariantRequest, DiseaseRequest, VariantAnnotation, GwasResponse, GwasAssociation, CompoundSummary, CompoundDetail
+from app.models import VariantRequest, DiseaseRequest, PatientReportRequest, VariantAnnotation, GwasResponse, GwasAssociation, CompoundSummary, CompoundDetail
 from app.services.vep_service import fetch_vep_annotation
 from app.services.clinvar_service import fetch_clinvar_data
 from app.services.gwas_service import fetch_gwas_associations
@@ -13,6 +14,7 @@ from app.services.motif_service import analyze_variant_motif_impact
 from app.services.conservation_service import calculate_substitution_cost
 from app.services.rsid_to_disease_service import get_diseases_by_rsid, get_diseases_by_rsids, get_rsid_gene_disease_mapping, resolve_rsid_to_variant
 from app.services.comprehensive_disease_service import get_comprehensive_disease, _local_clinvar_vcf_search
+from app.services.patient_report_service import build_report_json, generate_patient_pdf
 
 app = FastAPI(title="GenVarX Engine API", version="1.0.0")
 
@@ -1055,3 +1057,113 @@ async def comprehensive_disease_lookup(variant: str):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  PATIENT-BASED ANALYSIS PIPELINE
+#  Runs all three GenVarX features (gene variation, disease association,
+#  drug discovery) for a single patient and emits a unified report.
+# ══════════════════════════════════════════════════════════════════════
+
+async def _run_patient_pipeline(payload: PatientReportRequest) -> dict:
+    """Execute gene variation + disease association + drug discovery."""
+    # 1. Gene variation analysis (VEP + ClinVar + local datasets)
+    gene_result = await annotate(VariantRequest(variant=payload.variant.strip()))
+
+    # 2. Disease association (comprehensive multi-source lookup).
+    #    Prefer the explicitly provided rsID, fall back to the variant input.
+    disease_source = (payload.rsid or "").strip() or payload.variant.strip()
+    comp_result = await get_comprehensive_disease(disease_source)
+
+    # 3. Drug discovery: compounds targeting the identified gene.
+    gene_symbol = gene_result.gene_symbol
+    if not gene_symbol or gene_symbol in ("N/A", "Unknown", "Multiple", "nan"):
+        gene_symbol = (comp_result.get("gene_info") or {}).get("gene_symbol") or "N/A"
+    compounds = []
+    if gene_symbol and gene_symbol not in ("N/A", "Unknown", "Multiple", "nan"):
+        try:
+            compounds = await compounds_by_gene(gene_symbol)
+        except Exception:
+            compounds = []
+
+    return build_report_json(payload, gene_result, comp_result, compounds)
+
+
+@app.post("/api/patient-report")
+async def patient_report(payload: PatientReportRequest):
+    """
+    Run the full patient analysis pipeline (gene variation, disease
+    association, drug discovery) and return the unified patient report.
+    """
+    try:
+        return await _run_patient_pipeline(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Patient report failed: {e}")
+
+
+@app.post("/api/patient-report/assemble")
+async def patient_report_assemble(payload: PatientReportRequest):
+    """
+    Assemble a patient report from previously-generated module outputs
+    instead of re-running the three-feature pipeline. The frontend passes
+    the captured outputs it already produced:
+
+      captured_results = {
+        "gene_variation": {dict from /api/annotate},
+        "disease_association": {dict from /api/disease-comprehensive/...},
+        "drug_discovery": [list of compound dicts from ChEMBL search],
+      }
+
+    Falls back to running the pipeline when no captured data is supplied.
+    """
+    captured = payload.captured_results or {}
+
+    gene_variation_dict = captured.get("gene_variation") or {}
+    comp_result = captured.get("disease_association") or {}
+    compounds = captured.get("drug_discovery") or []
+
+    # Normalise the captured gene-variation dict into a VariantAnnotation so the
+    # report builder can read it with attribute access.
+    if gene_variation_dict:
+        gene_result = VariantAnnotation(
+            variant=str(gene_variation_dict.get("variant") or payload.variant or "N/A"),
+            rs_id=gene_variation_dict.get("rs_id") or None,
+            gene_symbol=gene_variation_dict.get("gene_symbol") or "N/A",
+            consequence=str(gene_variation_dict.get("consequence") or "N/A"),
+            sift_prediction=gene_variation_dict.get("sift_prediction") or "N/A",
+            polyphen_prediction=gene_variation_dict.get("polyphen_prediction") or "N/A",
+            amino_acid_change=gene_variation_dict.get("amino_acid_change") or "N/A",
+            impact_level=str(gene_variation_dict.get("impact_level") or "MODERATE"),
+            clinical_significance=gene_variation_dict.get("clinical_significance") or "Not Specified",
+            associated_diseases=gene_variation_dict.get("associated_diseases") or [],
+        )
+    else:
+        gene_result = await annotate(VariantRequest(variant=payload.variant))
+
+    return build_report_json(payload, gene_result, comp_result, compounds)
+
+
+@app.post("/api/patient-report/pdf")
+async def patient_report_pdf(payload: dict):
+    """
+    Render a patient report (the exact JSON returned by POST /api/patient-report)
+    into a downloadable authentic PDF document.
+    """
+    try:
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Expected patient report JSON object")
+        pdf_bytes = generate_patient_pdf(payload)
+        safe_name = str(payload.get("patient", {}).get("patient_name", "patient")).replace(" ", "_")
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="GenVarX_Patient_Report_{safe_name}.pdf"'
+                )
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")

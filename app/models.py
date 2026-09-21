@@ -15,6 +15,90 @@ class DiseaseRequest(BaseModel):
         description="Disease name to search"
     )
 
+class PatientReportRequest(BaseModel):
+    patient_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=120,
+        json_schema_extra={"example": "John Doe"},
+        description="Patient full name shown on the report"
+    )
+    patient_id: Optional[str] = Field(
+        default=None,
+        max_length=60,
+        json_schema_extra={"example": "PT-2024-0001"},
+        description="Optional patient / sample identifier"
+    )
+    variant: str = Field(
+        ...,
+        json_schema_extra={"example": "7:140753336:A:T"},
+        description="Genomic variant for gene-variation analysis (chr:pos:ref:alt)"
+    )
+    rsid: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        json_schema_extra={"example": "rs113488022"},
+        description="RSID used for disease-association lookup (falls back to the variant's resolved RSID)"
+    )
+    phenotype: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        json_schema_extra={"example": "Malignant melanoma of the skin"},
+        description="Phenotype / clinical indication text included on the report"
+    )
+    captured_results: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Optional captured outputs from the three GenVarX modules: "
+            "{gene_variation: VariantAnnotation dict, disease_association: comprehensive dict, "
+            "drug_discovery: compounds list}. When present, the report is assembled from these "
+            "instead of re-running the pipeline."
+        )
+    )
+
+class PatientAssembleRequest(BaseModel):
+    """Build a patient report from previously-run module outputs
+    (gene variation, disease association, drug discovery) instead of
+    re-running the entire pipeline on the backend."""
+    patient_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=120,
+        json_schema_extra={"example": "John Doe"},
+    )
+    patient_id: Optional[str] = Field(
+        default=None,
+        max_length=60,
+        json_schema_extra={"example": "PT-2024-0001"},
+    )
+    variant: Optional[str] = Field(
+        default=None,
+        json_schema_extra={"example": "7:140753336:A:T"},
+    )
+    rsid: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        json_schema_extra={"example": "rs113488022"},
+    )
+    phenotype: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        json_schema_extra={"example": "Malignant melanoma of the skin"},
+    )
+    gene_variation: Optional[dict] = Field(
+        default=None,
+        description="Full annotate endpoint output (VariantAnnotation as returned by /api/annotate)"
+    )
+    disease_association: Optional[dict] = Field(
+        default=None,
+        description="Full /api/disease-comprehensive output"
+    )
+    drug_discovery: Optional[dict] = Field(
+        default=None,
+        description="{\"gene_symbol\": ..., \"compounds\": [...]}"
+    )
+
+
 class VariantAnnotation(BaseModel):
     variant: str
     rs_id: Optional[str] = None

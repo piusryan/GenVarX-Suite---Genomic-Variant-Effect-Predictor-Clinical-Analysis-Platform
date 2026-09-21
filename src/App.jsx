@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound, getCompoundsByGene, getDiseasesByRsid, getDiseasesByRsidsBatch, getComprehensiveDisease } from './services/api';
-import { Dna, Search, AlertTriangle, Activity, ShieldAlert, Loader2, Database, Pill, Network, Terminal, Shield, RefreshCw, Copy, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound, getCompoundsByGene, getDiseasesByRsid, getDiseasesByRsidsBatch, getComprehensiveDisease, generatePatientReport, assemblePatientReport, downloadPatientReportPdf } from './services/api';
+import { Dna, Search, AlertTriangle, Activity, ShieldAlert, Loader2, Database, Pill, Network, Terminal, Shield, RefreshCw, Copy, ExternalLink, CheckCircle2, FileText, User, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import VariantVisualizer from './components/VariantVisualizer';
 import AdvancedProtein3D from './components/AdvancedProtein3D';
@@ -47,6 +47,23 @@ export default function App() {
   const [compoundDetail, setCompoundDetail] = useState(null);
   const [compoundDetailLoading, setCompoundDetailLoading] = useState(false);
 
+  // Patient Report Module State
+  const [patientName, setPatientName] = useState('John Doe');
+  const [patientId, setPatientId] = useState('PT-2024-0001');
+  const [patientVariant, setPatientVariant] = useState('7:140753336:A:T');
+  const [patientRsid, setPatientRsid] = useState('rs113488022');
+  const [patientPhenotype, setPatientPhenotype] = useState('Malignant melanoma (suspected)');
+  const [patientReport, setPatientReport] = useState(null);
+  const [patientLoading, setPatientLoading] = useState(false);
+  const [patientError, setPatientError] = useState(null);
+  const [patientPdfLoading, setPatientPdfLoading] = useState(false);
+  const [patientPdfDone, setPatientPdfDone] = useState(false);
+
+  // Captured module outputs (auto-refilled from GENE VARIANT / DISEASE ASSOC / DRUG DISCOVERY runs)
+  const [capturedVariant, setCapturedVariant] = useState(null);
+  const [capturedDisease, setCapturedDisease] = useState(null);
+  const [capturedDrugs, setCapturedDrugs] = useState(null);
+
   // Local dataset inventory (from /api/datasets/summary)
   const [datasetsSummary, setDatasetsSummary] = useState(null);
 
@@ -75,6 +92,10 @@ export default function App() {
     try {
       const result = await annotateVariant(variantInput.trim());
       setData(result);
+      // Capture for patient report + auto-refill the report's variant field
+      setCapturedVariant(result);
+      setPatientVariant(result?.variant && result.variant !== 'N/A' ? result.variant : variantInput.trim());
+      if (result?.rs_id && result.rs_id !== 'N/A') setPatientRsid(result.rs_id);
     } catch (err) {
       setError(err.message);
       setData(null);
@@ -97,6 +118,12 @@ export default function App() {
     try {
       const result = await getComprehensiveDisease(input);
       setComprehensiveDisease(result);
+      // Capture for patient report + auto-refill rsid/phenotype/variant fields
+      setCapturedDisease(result);
+      if (result?.resolved_rsid) setPatientRsid(result.resolved_rsid);
+      const topAssoc = result?.disease_associations?.[0];
+      if (topAssoc?.disease) setPatientPhenotype(topAssoc.disease);
+      if (result?.variant_display && result.variant_display !== 'N/A') setPatientVariant(result.variant_display);
     } catch (err) {
       setCompError(err.message);
       setComprehensiveDisease(null);
@@ -121,6 +148,17 @@ export default function App() {
       ]);
       setGwasData(annotationResult);
       setComprehensiveDisease(diseaseResult);
+      // Capture both module outputs for the patient report
+      setCapturedVariant(annotationResult);
+      setCapturedDisease(diseaseResult);
+      if (annotationResult?.variant && annotationResult.variant !== 'N/A') {
+        setPatientVariant(annotationResult.variant);
+      } else if (diseaseResult?.variant_display && diseaseResult.variant_display !== 'N/A') {
+        setPatientVariant(diseaseResult.variant_display);
+      }
+      if (diseaseResult?.resolved_rsid) setPatientRsid(diseaseResult.resolved_rsid);
+      const topAssoc = diseaseResult?.disease_associations?.[0];
+      if (topAssoc?.disease) setPatientPhenotype(topAssoc.disease);
       gwasDatasetAnalysis(gwasInput.trim())
         .then((res) => setDatasetAnalysis(res))
         .catch(() => setDatasetAnalysis(null));
@@ -176,6 +214,7 @@ export default function App() {
     try {
       const res = await searchCompounds(compoundQuery.trim(), 20);
       setCompoundResults(res);
+      setCapturedDrugs(res);
     } catch (err) {
       setCompoundError(err.message);
     } finally {
@@ -210,10 +249,70 @@ export default function App() {
     try {
       const res = await getCompoundsByGene(geneSymbol, 20);
       setCompoundResults(res);
+      setCapturedDrugs(res);
     } catch (err) {
       setCompoundError(err.message);
     } finally {
       setCompoundLoading(false);
+    }
+  };
+
+  // Run the full patient pipeline (gene variation + disease assoc + drug discovery)
+  const handlePatientReportRun = async (e) => {
+    if (e) e.preventDefault();
+    if (!patientName.trim() || !patientVariant.trim()) {
+      setPatientError('Patient name and a genomic variant are required.');
+      return;
+    }
+
+    setPatientLoading(true);
+    setPatientError(null);
+    setPatientReport(null);
+    setPatientPdfDone(false);
+    try {
+      const payload = {
+        patient_name: patientName.trim(),
+        patient_id: patientId.trim() || null,
+        variant: patientVariant.trim(),
+        rsid: patientRsid.trim() || null,
+        phenotype: patientPhenotype.trim() || null,
+      };
+
+      // If all three feature modules produced output, assemble the report from
+      // the captured data so nothing is re-queried and the report reflects
+      // exactly what the user already saw in the three modules.
+      if (capturedVariant && capturedDisease && capturedDrugs) {
+        payload.captured_results = {
+          gene_variation: capturedVariant,
+          disease_association: capturedDisease,
+          drug_discovery: capturedDrugs,
+        };
+        const result = await assemblePatientReport(payload);
+        setPatientReport(result);
+      } else {
+        const result = await generatePatientReport(payload);
+        setPatientReport(result);
+      }
+    } catch (err) {
+      setPatientError(err.message);
+    } finally {
+      setPatientLoading(false);
+    }
+  };
+
+  const handlePatientPdfDownload = async () => {
+    if (!patientReport) return;
+    setPatientPdfLoading(true);
+    setPatientPdfDone(false);
+    setPatientError(null);
+    try {
+      await downloadPatientReportPdf(patientReport);
+      setPatientPdfDone(true);
+      setTimeout(() => setPatientPdfDone(false), 4000);
+    } catch (err) {
+      setPatientError(err.message);
+    } finally {
+      setPatientPdfLoading(false);
     }
   };
 
@@ -249,6 +348,13 @@ export default function App() {
       description: 'ChEMBL database query',
       icon: Pill,
       themeColor: 'purple',
+    },
+    {
+      id: 'patient',
+      label: 'PATIENT REPORT',
+      description: 'Full pipeline + PDF report',
+      icon: FileText,
+      themeColor: 'orange',
     },
   ];
 
@@ -322,7 +428,9 @@ export default function App() {
                           ? 'bg-cyan-950/30 border-cyan-500/50 text-cyan-300 shadow-[0_0_15px_rgba(0,240,255,0.05)]'
                           : m.themeColor === 'green'
                             ? 'bg-emerald-950/30 border-emerald-500/50 text-emerald-300 shadow-[0_0_15px_rgba(0,255,136,0.05)]'
-                            : 'bg-purple-950/30 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.05)]'
+                            : m.themeColor === 'orange'
+                              ? 'bg-orange-950/30 border-orange-500/50 text-orange-300 shadow-[0_0_15px_rgba(255,165,0,0.05)]'
+                              : 'bg-purple-950/30 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.05)]'
                         : 'bg-slate-950/40 border-slate-900 text-slate-400 hover:text-slate-200 hover:border-slate-800'
                     }`}
                   >
@@ -333,7 +441,9 @@ export default function App() {
                             ? 'bg-cyan-900/30 border-cyan-400/30'
                             : m.themeColor === 'green'
                               ? 'bg-emerald-900/30 border-emerald-400/30'
-                              : 'bg-purple-900/30 border-purple-400/30'
+                              : m.themeColor === 'orange'
+                                ? 'bg-orange-900/30 border-orange-400/30'
+                                : 'bg-purple-900/30 border-purple-400/30'
                           : 'bg-slate-900/50 border-slate-800'
                       }`}>
                         <Icon className="w-4 h-4" />
@@ -349,6 +459,7 @@ export default function App() {
                       <div className={`absolute top-0 right-0 w-1 h-full ${
                         m.themeColor === 'cyan' ? 'bg-cyan-400 shadow-[0_0_8px_#00f0ff]' :
                         m.themeColor === 'green' ? 'bg-emerald-400 shadow-[0_0_8px_#00ff88]' :
+                        m.themeColor === 'orange' ? 'bg-orange-400 shadow-[0_0_8px_#fb923c]' :
                         'bg-purple-400 shadow-[0_0_8px_#a855f7]'
                       }`} />
                     )}
@@ -1368,6 +1479,429 @@ export default function App() {
                 </HUDFrame>
 
               </div>
+
+            </div>
+          )}
+
+          {activeModule === 'patient' && (
+            <div className="flex flex-col gap-6">
+
+              {/* ── Patient report input form ─────────────────────────── */}
+              <HUDFrame title="PATIENT ANALYSIS PIPELINE // IDENTITY + INPUTS" variant="purple" className="neon-glow-purple">
+                <form onSubmit={handlePatientReportRun} className="space-y-4">
+
+                  {/* Patient identity */}
+                  <div className="space-y-3">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                      <User className="inline w-3.5 h-3.5 mr-1 text-purple-400" />
+                      Patient Identity
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        value={patientName}
+                        onChange={(e) => setPatientName(e.target.value)}
+                        placeholder="Patient full name"
+                        className="w-full bg-slate-950/70 border border-slate-800 focus:border-purple-500 rounded-lg py-3 pl-4 pr-4 text-slate-100 placeholder-slate-600 outline-none transition font-mono text-sm tracking-wider"
+                      />
+                      <input
+                        type="text"
+                        value={patientId}
+                        onChange={(e) => setPatientId(e.target.value)}
+                        placeholder="Patient ID (optional)"
+                        className="w-full bg-slate-950/70 border border-slate-800 focus:border-purple-500 rounded-lg py-3 pl-4 pr-4 text-slate-100 placeholder-slate-600 outline-none transition font-mono text-sm tracking-wider"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-800 pt-4 space-y-3">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                      Pipeline Inputs (Gene Variation → Disease Association → Drug Discovery):
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-mono text-emerald-400 uppercase tracking-widest font-bold">① Gene Variant (Genomic Coordinate)</label>
+                        <input
+                          type="text"
+                          value={patientVariant}
+                          onChange={(e) => setPatientVariant(e.target.value)}
+                          placeholder="e.g. 7:140753336:A:T"
+                          className="w-full bg-slate-950/70 border border-slate-800 focus:border-emerald-500 rounded-lg py-2.5 px-3 text-slate-100 placeholder-slate-600 outline-none transition font-mono text-xs tracking-wider"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-mono text-purple-400 uppercase tracking-widest font-bold">② RSID (Disease Association)</label>
+                        <input
+                          type="text"
+                          value={patientRsid}
+                          onChange={(e) => setPatientRsid(e.target.value)}
+                          placeholder="e.g. rs113488022 (optional)"
+                          className="w-full bg-slate-950/70 border border-slate-800 focus:border-purple-500 rounded-lg py-2.5 px-3 text-slate-100 placeholder-slate-600 outline-none transition font-mono text-xs tracking-wider"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-mono text-orange-400 uppercase tracking-widest font-bold">③ Phenotype / Indication</label>
+                        <input
+                          type="text"
+                          value={patientPhenotype}
+                          onChange={(e) => setPatientPhenotype(e.target.value)}
+                          placeholder="Clinical phenotype (optional)"
+                          className="w-full bg-slate-950/70 border border-slate-800 focus:border-orange-500 rounded-lg py-2.5 px-3 text-slate-100 placeholder-slate-600 outline-none transition font-mono text-xs tracking-wider"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Captured module output status ── */}
+                  <div className="border-t border-slate-800 pt-3">
+                    <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono mb-2 flex items-center gap-2">
+                      <RefreshCw className="w-3 h-3 text-cyan-400" />
+                      Module Output Auto-Capture (runs in the other 3 tabs → auto-refills fields above)
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      {[
+                        { label: '① Gene Variation', ready: !!capturedVariant, detail: capturedVariant?.gene_symbol ? `Gene: ${capturedVariant.gene_symbol}` : 'not run yet' },
+                        { label: '② Disease Association', ready: !!capturedDisease, detail: capturedDisease?.resolved_rsid ? `RSID: ${capturedDisease.resolved_rsid}` : 'not run yet' },
+                        { label: '③ Drug Discovery', ready: capturedDrugs?.length > 0, detail: capturedDrugs?.length ? `${capturedDrugs.length} compound(s)` : 'not run yet' },
+                      ].map((m, idx) => (
+                        <div key={idx} className={`flex items-center justify-between gap-2 p-2 rounded border font-mono text-[9px] ${m.ready ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300' : 'bg-slate-950/40 border-slate-800 text-slate-500'}`}>
+                          <span className="uppercase tracking-wider font-bold">{m.label}</span>
+                          <span className="text-right">{m.ready ? <CheckCircle2 className="w-3 h-3 inline mr-1 text-emerald-400" /> : <AlertTriangle className="w-3 h-3 inline mr-1 text-amber-500/70" />}{m.detail}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 text-[9px] font-mono text-slate-500">
+                      {capturedVariant && capturedDisease && capturedDrugs?.length > 0
+                        ? '✓ All 3 module outputs captured — report will be built from them directly (no re-query).'
+                        : 'Run GENE VARIANT → DISEASE ASSOC → DRUG DISCOVERY first; their outputs auto-fill this report.'}
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={patientLoading}
+                    className="w-full bg-orange-500 hover:bg-orange-400 disabled:bg-orange-900/30 text-slate-950 font-bold px-6 py-3 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 text-xs tracking-widest font-display btn-neon shadow-[0_0_15px_rgba(255,165,0,0.2)]"
+                  >
+                    {patientLoading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin text-slate-950" />ASSEMBLING REPORT FROM MODULE OUTPUTS...</>
+                    ) : (
+                      <><FileText className="w-4 h-4 text-slate-950" />GENERATE PATIENT REPORT</>
+                    )}
+                  </button>
+
+                  <div className="text-[9px] font-mono text-slate-500 border-t border-slate-800 pt-3">
+                    Only the patient name (and optional ID) are required — variant, RSID and phenotype are
+                    auto-refilled from the three module runs above. The generated report bundles gene
+                    variation, disease associations + publications + GWAS/HPO evidence, and candidate
+                    medicines into one document (also downloadable as an authentic PDF).
+                  </div>
+                </form>
+
+                {/* Preset patient scenarios */}
+                <div className="space-y-2 mt-4">
+                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Test Patient Presets:</div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => {
+                      setPatientName('Melanoma Case'); setPatientId('PT-MELA-001');
+                      setPatientVariant('7:140753336:A:T'); setPatientRsid('rs113488022');
+                      setPatientPhenotype('Malignant melanoma (suspected)');
+                    }} className="hover:text-orange-400 transition font-mono text-[9px] bg-red-950/40 border border-red-500/20 px-2 py-1 rounded hover:border-red-500/40">BRAF V600E Melanoma</button>
+                    <button type="button" onClick={() => {
+                      setPatientName('MPN Case'); setPatientId('PT-MPN-002');
+                      setPatientVariant('9:5073770:G:T'); setPatientRsid('rs77375493');
+                      setPatientPhenotype('Myeloproliferative neoplasm / polycythemia vera (suspected)');
+                    }} className="hover:text-orange-400 transition font-mono text-[9px] bg-amber-950/40 border border-amber-500/20 px-2 py-1 rounded hover:border-amber-500/40">JAK2 V617F MPN</button>
+                    <button type="button" onClick={() => {
+                      setPatientName('Li-Fraumeni S-Workup'); setPatientId('PT-TP53-003');
+                      setPatientVariant('17:7673802:C:T'); setPatientRsid('rs28934576');
+                      setPatientPhenotype('Hereditary cancer syndrome workup (Li-Fraumeni)');
+                    }} className="hover:text-orange-400 transition font-mono text-[9px] bg-yellow-950/40 border border-yellow-500/20 px-2 py-1 rounded hover:border-yellow-500/40">TP53 R248W</button>
+                  </div>
+                </div>
+              </HUDFrame>
+
+              {/* Patient report errors */}
+              <AnimatePresence>
+                {patientError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex items-start gap-3 p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-lg text-xs font-mono"
+                  >
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <div>{patientError}</div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* ── Rendered patient report ──────────────────────────── */}
+              {patientReport && !patientLoading && (
+                <div className="flex flex-col gap-6">
+
+                  {/* Report master header */}
+                  <HUDFrame title="PATIENT REPORT MASTER VIEW" variant="purple" className="neon-glow-purple">
+                    <div className="flex flex-col md:flex-row justify-between gap-6">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-lg font-mono font-bold text-slate-100">
+                            {patientReport.patient?.patient_name}
+                          </span>
+                          <span className="px-2.5 py-0.5 text-[10px] font-bold rounded bg-orange-950/40 text-orange-400 border border-orange-500/30 font-mono">
+                            {patientReport.report_id}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                          <Database className="w-4 h-4 text-purple-400" />
+                          <span>Generated: <strong className="text-purple-400">{patientReport.generated_at}</strong></span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handlePatientPdfDownload}
+                        disabled={patientPdfLoading}
+                        className="bg-orange-500 hover:bg-orange-400 disabled:bg-orange-900/30 text-slate-950 font-bold px-6 py-3 rounded-lg transition-all flex items-center justify-center gap-2 text-xs tracking-widest font-display btn-neon shadow-[0_0_15px_rgba(255,165,0,0.2)]"
+                      >
+                        {patientPdfLoading ? (
+                          <><Loader2 className="w-4 h-4 animate-spin text-slate-950" />RENDERING PDF...</>
+                        ) : patientPdfDone ? (
+                          <><CheckCircle2 className="w-4 h-4 text-slate-950" />DOWNLOADED ✓</>
+                        ) : (
+                          <><Download className="w-4 h-4 text-slate-950" />DOWNLOAD PDF REPORT</>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4 pt-4 border-t border-slate-800">
+                      {[
+                        { label: 'Patient Name', value: patientReport.patient?.patient_name },
+                        { label: 'Patient ID', value: patientReport.patient?.patient_id },
+                        { label: 'Phenotype', value: patientReport.patient?.phenotype },
+                        { label: 'Variant', value: patientReport.gene_variation?.input_variant },
+                        { label: 'RSID', value: patientReport.disease_association?.resolved_rsid },
+                      ].map((cell, idx) => (
+                        <div key={idx} className="data-cell">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">{cell.label}</span>
+                          <span className="text-[11px] font-mono text-slate-200 break-all">{cell.value || 'N/A'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </HUDFrame>
+
+                  {/* 1. Gene Variation */}
+                  <HUDFrame title="1. GENE VARIATION // EFFECT PREDICTION" variant="green">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {[
+                        { label: 'Gene Symbol', value: patientReport.gene_variation?.gene_symbol, strong: true },
+                        { label: 'Gene Type', value: patientReport.gene_variation?.gene_type },
+                        { label: 'Full Gene Name', value: patientReport.gene_variation?.gene_full_name },
+                        { label: 'What Changed (AA)', value: patientReport.gene_variation?.amino_acid_change },
+                        { label: 'Consequence', value: patientReport.gene_variation?.consequence },
+                        { label: 'Impact Level', value: patientReport.gene_variation?.impact_level, impact: true },
+                        { label: 'SIFT', value: patientReport.gene_variation?.sift_prediction },
+                        { label: 'PolyPhen', value: patientReport.gene_variation?.polyphen_prediction },
+                      ].map((cell, idx) => (
+                        <div key={idx} className="data-cell">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">{cell.label}</span>
+                          {cell.impact ? getImpactBadge(cell.value) : (
+                            <span className={`text-[11px] font-mono break-all ${cell.strong ? 'text-emerald-400 font-bold' : 'text-slate-200'}`}>{cell.value || 'N/A'}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="data-cell mt-3">
+                      <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">CLINICAL SIGNIFICANCE</span>
+                      <span className="text-xs font-mono font-medium text-amber-400">{patientReport.gene_variation?.clinical_significance || 'N/A'}</span>
+                    </div>
+                    {patientReport.gene_variation?.gene_description && patientReport.gene_variation?.gene_description !== 'N/A' && (
+                      <div className="data-cell mt-3">
+                        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">GENE SUMMARY</span>
+                        <span className="text-[11px] text-slate-400 leading-relaxed block">{patientReport.gene_variation.gene_description}</span>
+                      </div>
+                    )}
+                    {patientReport.gene_variation?.associated_diseases?.length > 0 && (
+                      <div className="data-cell mt-3">
+                        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">ASSOCIATED CONDITIONS ({patientReport.gene_variation.associated_diseases.length})</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {patientReport.gene_variation.associated_diseases.map((dis, idx) => (
+                            <span key={idx} className="text-[10px] font-mono bg-slate-950/60 text-slate-300 px-2 py-0.5 rounded border border-emerald-500/20">{dis}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </HUDFrame>
+
+                  {/* 2. Disease Association */}
+                  <HUDFrame title="2. DISEASE ASSOCIATION // MULTI-SOURCE EVIDENCE" variant="purple">
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
+                      {[
+                        { label: 'Resolved RSID', value: patientReport.disease_association?.resolved_rsid },
+                        { label: 'Clinical Significance', value: patientReport.disease_association?.clinical_significance },
+                        { label: 'Total Associations', value: String(patientReport.disease_association?.source_counts?.total_associations ?? 'N/A') },
+                        { label: 'GWAS Traits', value: String((patientReport.disease_association?.source_counts?.gwas_traits ?? 0) + (patientReport.disease_association?.source_counts?.gwas_tsv_local ?? 0)) },
+                        { label: 'ClinVar Conditions', value: String(patientReport.disease_association?.source_counts?.clinvar_conditions ?? 'N/A') },
+                        { label: 'Publications', value: String(patientReport.disease_association?.source_counts?.publications ?? 'N/A') },
+                      ].map((cell, idx) => (
+                        <div key={idx} className="data-cell">
+                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">{cell.label}</span>
+                          <span className="text-[11px] font-mono text-slate-200 break-all">{cell.value}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {(patientReport.disease_association?.disease_associations?.length > 0) && (
+                      <div className="data-cell mb-4">
+                        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">DISEASE ASSOCIATIONS</span>
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                          {patientReport.disease_association.disease_associations.map((d, idx) => (
+                            <div key={idx} className="p-2.5 bg-slate-950/40 border border-purple-500/20 rounded-lg flex justify-between items-start gap-2">
+                              <div>
+                                <span className="text-[11px] font-mono text-purple-300 font-bold">{d.disease || 'N/A'}</span>
+                                <div className="text-[9px] text-slate-500 mt-0.5">
+                                  {d.gene && <span>Gene: {d.gene} · </span>}
+                                  {d.pvalue && <span className="text-emerald-400">p={d.pvalue} · </span>}
+                                  {d.risk_allele && <span>Risk allele: {d.risk_allele} · </span>}
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                <span className={`text-[8px] font-bold px-2 py-0.5 rounded font-mono ${String(d.source).includes('Local') ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20' : 'bg-blue-950/40 text-blue-300 border border-blue-500/20'}`}>
+                                  {d.source}
+                                </span>
+                                {d.clinical_significance && d.clinical_significance !== 'Not Available' && (
+                                  <span className="text-[8px] text-amber-400 font-mono">{d.clinical_significance}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {(patientReport.disease_association?.gwas_findings?.length > 0) && (
+                      <div className="data-cell mb-4">
+                        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">GWAS CATALOG FINDINGS</span>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[10px] font-mono">
+                            <thead>
+                              <tr className="text-[9px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
+                                <th className="text-left py-2 pr-3">TRAIT / DISEASE</th>
+                                <th className="text-left py-2 pr-3">P-VALUE</th>
+                                <th className="text-left py-2 pr-3">RISK ALLELE</th>
+                                <th className="text-left py-2 pr-3">GENE</th>
+                                <th className="text-left py-2 pr-3">PMID</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {patientReport.disease_association.gwas_findings.slice(0, 15).map((g, idx) => (
+                                <tr key={idx} className="border-b border-slate-900/60">
+                                  <td className="py-2 pr-3 text-slate-200">{g.disease}</td>
+                                  <td className="py-2 pr-3 text-emerald-400 font-bold">{g.pvalue || 'N/A'}</td>
+                                  <td className="py-2 pr-3 text-slate-300">{g.risk_allele || 'N/A'}</td>
+                                  <td className="py-2 pr-3 text-emerald-300">{g.gene || 'N/A'}</td>
+                                  <td className="py-2 pr-3">
+                                    {g.pubmed_id ? (
+                                      <a href={`https://pubmed.ncbi.nlm.nih.gov/${g.pubmed_id}/`} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
+                                        {g.pubmed_id} <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    ) : (g.study_id || 'N/A')}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {(patientReport.disease_association?.hpo_phenotypes?.length > 0) && (
+                      <div className="data-cell">
+                        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 font-mono">HPO PHENOTYPES</span>
+                        <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
+                          {patientReport.disease_association.hpo_phenotypes.map((p, idx) => (
+                            <span key={idx} className="text-[10px] font-mono bg-orange-950/30 text-orange-300 px-2 py-0.5 rounded border border-orange-500/20" title={`${p.frequency || ''} ${p.disease_id || ''}`}>
+                              {p.phenotype}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </HUDFrame>
+
+                  {/* 2b. Publications */}
+                  <HUDFrame title="2b. RELATED PUBLICATIONS // PUBMED" variant="blue">
+                    {(patientReport.publications?.length > 0) ? (
+                      <div className="space-y-2 max-h-72 overflow-y-auto">
+                        {patientReport.publications.map((pub, idx) => (
+                          <div key={idx} className="p-3 bg-slate-950/40 border border-blue-500/20 rounded-lg hover:border-blue-500/40 transition-all">
+                            <a href={pub.url} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-blue-400 hover:text-blue-300 font-medium flex items-start gap-1">
+                              {pub.title} <ExternalLink className="w-3 h-3 mt-0.5 shrink-0" />
+                            </a>
+                            <div className="text-[9px] text-slate-500 mt-1">{pub.authors}</div>
+                            <div className="text-[9px] text-slate-400 mt-0.5 italic">{pub.journal} ({pub.year}) · PMID: {pub.pubmed_id}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-slate-500 font-mono text-xs uppercase">No publications found</div>
+                    )}
+                  </HUDFrame>
+
+                  {/* 3. Drug Discovery */}
+                  <HUDFrame title="3. DRUG DISCOVERY // CANDIDATE MEDICINES (ChEMBL)" variant="green">
+                    <div className="flex items-center gap-2 mb-3 text-xs font-mono text-slate-400">
+                      <Pill className="w-4 h-4 text-emerald-400" />
+                      Compounds targeting <strong className="text-emerald-400">{patientReport.drug_discovery?.gene_symbol || 'N/A'}</strong>
+                    </div>
+                    {(patientReport.drug_discovery?.compounds?.length > 0) ? (
+                      <div className="space-y-2 max-h-80 overflow-y-auto">
+                        {patientReport.drug_discovery.compounds.map((c, idx) => (
+                          <div key={idx} className="p-3 bg-slate-950/40 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition-all">
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="text-xs font-mono text-emerald-300 font-bold">{c.name}</span>
+                              <div className="flex items-center gap-2">
+                                {c.max_phase && c.max_phase !== 'N/A' && <span className="text-[9px] bg-blue-950/40 text-blue-300 px-1.5 py-0.5 rounded font-mono">Phase {c.max_phase}</span>}
+                                <span className="text-[9px] text-slate-500 font-mono">{c.chembl_id}</span>
+                              </div>
+                            </div>
+                            {c.targets && c.targets !== 'N/A' && <div className="text-[9px] text-slate-500 mt-1 break-all">Targets: {c.targets}</div>}
+                            {c.bioactivities && c.bioactivities !== 'N/A' && <div className="text-[9px] text-slate-500 mt-0.5">Bioactivities: {c.bioactivities}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (patientReport.drug_discovery?.local_chembl_compounds?.length > 0) ? (
+                      <div className="space-y-2 max-h-80 overflow-y-auto">
+                        {patientReport.drug_discovery.local_chembl_compounds.map((c, idx) => (
+                          <div key={idx} className="p-3 bg-slate-950/40 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition-all">
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="text-xs font-mono text-emerald-300 font-bold">{c.name}</span>
+                              <div className="flex items-center gap-2">
+                                {c.max_phase && c.max_phase !== 'N/A' && <span className="text-[9px] bg-blue-950/40 text-blue-300 px-1.5 py-0.5 rounded font-mono">Phase {c.max_phase}</span>}
+                                {c.type && <span className="text-[9px] text-slate-500 font-mono">{c.type}</span>}
+                                <span className="text-[9px] text-slate-600 font-mono">{c.chembl_id}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-slate-500 font-mono text-xs uppercase">No drug-target compounds discovered for this gene</div>
+                    )}
+                    <div className="mt-3 text-[9px] font-mono text-slate-500 border-t border-slate-800 pt-2">
+                      Drug discovery is the final stage: it runs automatically after the gene is resolved from the gene-variation step.
+                    </div>
+                  </HUDFrame>
+
+                </div>
+              )}
+
+              {/* Prompt when no patient report yet */}
+              {!patientReport && !patientLoading && !patientError && (
+                <div className="text-center py-8 text-slate-500 font-mono text-xs">
+                  <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  Enter patient identity + variant, then RUN PATIENT PIPELINE to generate the full report (gene variation, disease associations, publications, drug candidates & PDF).
+                </div>
+              )}
 
             </div>
           )}

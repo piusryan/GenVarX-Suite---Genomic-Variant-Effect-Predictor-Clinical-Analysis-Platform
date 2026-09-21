@@ -180,3 +180,60 @@ export const getComprehensiveDisease = async (variantString) => {
     }
   }
 };
+
+export const generatePatientReport = async (patientReportPayload) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/api/patient-report`, patientReportPayload);
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Patient report generation failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
+
+export const assemblePatientReport = async (assemblePayload) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/api/patient-report/assemble`, assemblePayload);
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Patient report assembly failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
+
+export const downloadPatientReportPdf = async (patientReportJson) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/api/patient-report/pdf`, patientReportJson, {
+      responseType: 'blob',
+    });
+    const disposition = String(response.headers['content-disposition'] || '');
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match ? match[1] : 'GenVarX_Patient_Report.pdf';
+    const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'PDF download failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
