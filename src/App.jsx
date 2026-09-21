@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound, getDiseasesByRsid, getComprehensiveDisease } from './services/api';
+import { annotateVariant, fetchGwasAssociations, gwasDatasetAnalysis, getDiseaseAssociations, getDatasetsSummary, searchCompounds, getCompound, getCompoundsByGene, getDiseasesByRsid, getDiseasesByRsidsBatch, getComprehensiveDisease } from './services/api';
 import { Dna, Search, AlertTriangle, Activity, ShieldAlert, Loader2, Database, Pill, Network, Terminal, Shield, RefreshCw, Copy, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import VariantVisualizer from './components/VariantVisualizer';
@@ -47,6 +47,9 @@ export default function App() {
   const [compoundDetail, setCompoundDetail] = useState(null);
   const [compoundDetailLoading, setCompoundDetailLoading] = useState(false);
 
+  // Local dataset inventory (from /api/datasets/summary)
+  const [datasetsSummary, setDatasetsSummary] = useState(null);
+
   // Time clock state
   const [systemTime, setSystemTime] = useState(new Date().toISOString());
   useEffect(() => {
@@ -54,6 +57,13 @@ export default function App() {
       setSystemTime(new Date().toISOString());
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Load local dataset inventory once on mount
+  useEffect(() => {
+    getDatasetsSummary()
+      .then(setDatasetsSummary)
+      .catch(() => setDatasetsSummary(null));
   }, []);
 
   const handleSearch = async (e) => {
@@ -103,6 +113,7 @@ export default function App() {
     setGwasError(null);
     setComprehensiveDisease(null);
     setCompError(null);
+    setDatasetAnalysis(null);
     try {
       const [annotationResult, diseaseResult] = await Promise.all([
         annotateVariant(gwasInput.trim()),
@@ -110,6 +121,9 @@ export default function App() {
       ]);
       setGwasData(annotationResult);
       setComprehensiveDisease(diseaseResult);
+      gwasDatasetAnalysis(gwasInput.trim())
+        .then((res) => setDatasetAnalysis(res))
+        .catch(() => setDatasetAnalysis(null));
     } catch (err) {
       setGwasError(err.message);
       setGwasData(null);
@@ -180,6 +194,26 @@ export default function App() {
       setCompoundError(err.message);
     } finally {
       setCompoundDetailLoading(false);
+    }
+  };
+
+  // Auto-suggest compounds that target the gene identified from the current variant.
+  const handleGeneCompoundSearch = async (geneSymbol) => {
+    if (!geneSymbol || geneSymbol === 'N/A') return;
+    setCompoundQuery(geneSymbol);
+    setCompoundLoading(true);
+    setCompoundError(null);
+    setCompoundResults([]);
+    setSelectedCompoundId(null);
+    setCompoundDetail(null);
+
+    try {
+      const res = await getCompoundsByGene(geneSymbol, 20);
+      setCompoundResults(res);
+    } catch (err) {
+      setCompoundError(err.message);
+    } finally {
+      setCompoundLoading(false);
     }
   };
 
@@ -615,6 +649,48 @@ export default function App() {
                   </div>
                 </div>
               </HUDFrame>
+
+              {/* Local dataset inventory status */}
+              {datasetsSummary && (
+                <HUDFrame title="DATA SOURCES // LOCAL DATASET STATUS" variant="blue" className="neon-glow-blue">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {[
+                      { key: 'clinvar_vcf', label: 'ClinVar VCF', icon: '📂' },
+                      { key: 'clinvar_tsv', label: 'ClinVar Conflicting', icon: '⚠️' },
+                      { key: 'gwas_tsv', label: 'GWAS Catalog TSV', icon: '📊' },
+                      { key: 'hpo', label: 'HPO Phenotypes', icon: '🧩' },
+                      { key: 'disease_names', label: 'Disease Names', icon: '🗂️' },
+                      { key: 'chembl', label: 'ChEMBL Compounds', icon: '💊' },
+                      { key: 'reference_gff', label: 'GENCODE GFF3', icon: '🧬' },
+                      { key: 'reference_tsv', label: 'Human Genome TSV', icon: '🧭' },
+                    ].map(ds => {
+                      const info = datasetsSummary.datasets?.[ds.key] || {};
+                      const online = !!info.exists;
+                      return (
+                        <div key={ds.key} className={`p-2.5 rounded-lg border transition-all ${online ? 'bg-emerald-950/20 border-emerald-500/30' : 'bg-red-950/20 border-red-500/30'}`}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-xs">{ds.icon}</span>
+                            <span className={`text-[9px] font-bold uppercase tracking-wider ${online ? 'text-emerald-400' : 'text-red-400'}`}>{ds.label}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-mono text-slate-500">
+                              {info.rows != null ? `${Number(info.rows).toLocaleString()} rows` : `${info.size_mb || 0} MB`}
+                            </span>
+                            <span className={`text-[9px] font-mono font-bold ${online ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {online ? 'ONLINE' : 'OFFLINE'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 text-[9px] font-mono text-slate-500 border-t border-slate-800 pt-2">
+                    <span className="text-blue-400 font-bold">
+                      {Object.values(datasetsSummary.datasets || {}).filter(d => d.exists).length}/{Object.keys(datasetsSummary.datasets || {}).length}
+                    </span>{' '}datasets ONLINE on disk · loaded via /api/datasets/summary
+                  </div>
+                </HUDFrame>
+              )}
 
               {/* GWAS error */}
               <AnimatePresence>
@@ -1096,6 +1172,27 @@ export default function App() {
             <div className="flex flex-col gap-6">
               
               <HUDFrame title="CHEMBL COMPOUND SEARCH" variant="purple" className="neon-glow-purple">
+                {/* Variant-aware compound suggestion */}
+                {data?.gene_symbol && data.gene_symbol !== 'N/A' && (
+                  <div className="mb-4 p-3 bg-purple-950/20 border border-purple-500/20 rounded-lg">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="text-xs text-slate-300">
+                        <span className="text-purple-400 font-bold uppercase tracking-wider">Variant context:</span>
+                        {' '}Gene <span className="font-mono font-bold text-purple-300">{data.gene_symbol}</span> identified from <span className="font-mono text-slate-400">{variantInput}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleGeneCompoundSearch(data.gene_symbol)}
+                        disabled={compoundLoading}
+                        className="shrink-0 px-3 py-1.5 text-[10px] font-bold font-mono bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 rounded transition flex items-center gap-1.5"
+                      >
+                        {compoundLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Network className="w-3 h-3" />}
+                        Find compounds targeting {data.gene_symbol}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <form onSubmit={handleCompoundSearch} className="space-y-4">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
                     Search compound database (by name, ID, or target):

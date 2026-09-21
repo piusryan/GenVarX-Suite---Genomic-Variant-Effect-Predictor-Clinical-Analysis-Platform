@@ -81,70 +81,136 @@ async def _search_clinvar_by_disease(disease_name: str) -> List[Dict[str, Any]]:
         vcf_path = "data/datasets/clinvar/clinvar.vcf"
         disease_tsv_path = "data/datasets/clinvar/disease_names.tsv"
         gwas_path = "data/datasets/clinvar/gwas-catalog-download-associations-v1.0-full.tsv"
-        
+
         results = []
         disease_lower = disease_name.lower()
-        
+
+        def _clean_name(n):
+            if not n:
+                return None
+            cleaned = n.strip().replace('_', ' ')
+            low = cleaned.lower()
+            if not cleaned or low in (
+                'not provided', 'not specified', 'not_provided', 'not_specified',
+                'unknown', '.', 'na', 'n/a'
+            ):
+                return None
+            return cleaned
+
+        def _clean_sig(s):
+            return s.strip().replace('_', ' ') if s else ''
+
         # Search disease names TSV to find related RSIDs
         disease_rsids = set()
         if os.path.exists(disease_tsv_path):
             try:
                 df = pd.read_csv(disease_tsv_path, sep='\t', low_memory=False)
+                df.columns = [c.lstrip('#') for c in df.columns]
                 if 'DiseaseName' in df.columns:
                     matches = df[df['DiseaseName'].str.lower().str.contains(disease_lower, na=False, regex=False)]
-                    disease_rsids = set(matches.get('concept_id', []).unique() if 'concept_id' in matches.columns else [])
+                    disease_rsids = set(matches.get('ConceptID', []).unique() if 'ConceptID' in matches.columns else [])
             except Exception as e:
                 print(f"[DISEASE_SEARCH] Disease TSV search error: {e}")
-        
+
         # Search VCF for matching diseases
         if os.path.exists(vcf_path):
             try:
-                with open(vcf_path, 'r') as f:
+                with open(vcf_path, 'r', encoding='utf-8', errors='replace') as f:
                     for line in f:
-                        if line.startswith('##') or line.startswith('#'):
+                        if line.startswith('#'):
                             continue
-                        
                         parts = line.strip().split('\t')
                         if len(parts) < 8:
                             continue
-                        
+
                         info = parts[7]
                         info_dict = {}
                         for item in info.split(';'):
                             if '=' in item:
                                 k, v = item.split('=', 1)
                                 info_dict[k] = v
-                        
-                        # Check if disease matches
-                        disease = info_dict.get('CLNDN', '')
-                        if disease and disease_lower in disease.lower():
+
+                        cldn_raw = info_dict.get('CLNDN', '')
+                        disease_names = []
+                        if cldn_raw:
+                            for raw_d in cldn_raw.split('|'):
+                                cd = _clean_name(raw_d)
+                                if cd:
+                                    disease_names.append(cd)
+
+                        matched_diseases = [d for d in disease_names if disease_lower in d.lower()]
+                        if not matched_diseases:
+                            continue
+
+                        gene = info_dict.get('SYMBOL', '')
+                        if not gene:
+                            gi = info_dict.get('GENEINFO', '')
+                            if gi and ':' in gi:
+                                gene = gi.split(':', 1)[0]
+                        if not gene:
+                            gene = 'Unknown'
+
+                        consequence = info_dict.get('Consequence', '')
+                        mc = info_dict.get('MC', '')
+                        if not consequence and mc and '|' in mc:
+                            try:
+                                consequence = mc.split('|', 1)[1].replace('_', ' ')
+                            except Exception:
+                                pass
+
+                        rsid_val = ''
+                        info_rs = info_dict.get('RS', '')
+                        if info_rs:
+                            first_rs = info_rs.split('|')[0]
+                            rsid_val = f"rs{first_rs}"
+                        else:
+                            for vid in parts[2].split(';'):
+                                if vid.lower().startswith('rs'):
+                                    rsid_val = vid
+                                    break
+                        if not rsid_val:
+                            rsid_val = parts[2]
+
+                        clin_sig = _clean_sig(info_dict.get('CLNSIG', '')) or 'Unknown'
+                        impact = info_dict.get('IMPACT', '')
+
+                        for dname in matched_diseases:
                             results.append({
                                 "source": "ClinVar VCF",
                                 "variant": f"{parts[0]}:{parts[1]}:{parts[3]}:{parts[4]}",
-                                "rsid": parts[2],
-                                "gene": info_dict.get('SYMBOL', 'Unknown'),
-                                "disease": disease,
-                                "clinical_significance": info_dict.get('CLNSIG', 'Unknown'),
-                                "consequence": info_dict.get('Consequence', ''),
-                                "impact": info_dict.get('IMPACT', '')
+                                "rsid": rsid_val,
+                                "gene": gene,
+                                "disease": dname,
+                                "clinical_significance": clin_sig,
+                                "consequence": consequence,
+                                "impact": impact,
                             })
+                            if len(results) >= 30:
+                                break
+                        if len(results) >= 30:
+                            break
             except Exception as e:
                 print(f"[DISEASE_SEARCH] VCF search error: {e}")
         
-        # Search GWAS TSV
+        # Search GWAS TSV (full scan using the real uppercase column names)
         if os.path.exists(gwas_path):
             try:
-                df = pd.read_csv(gwas_path, sep='\t', low_memory=False, nrows=5000)
-                if 'disease_trait' in df.columns:
-                    matches = df[df['disease_trait'].str.lower().str.contains(disease_lower, na=False, regex=False)]
+                gwas_cols = lambda c: c in {
+                    'CHR_ID', 'CHR_POS', 'SNPS', 'MAPPED_GENE', 'DISEASE/TRAIT',
+                    'P-VALUE', 'STRONGEST SNP-RISK ALLELE'
+                }
+                df = pd.read_csv(gwas_path, sep='\t', low_memory=False,
+                                 usecols=gwas_cols, dtype=str)
+                if 'DISEASE/TRAIT' in df.columns:
+                    matches = df[df['DISEASE/TRAIT'].str.lower().str.contains(disease_lower, na=False, regex=False)]
                     for _, row in matches.head(10).iterrows():
                         results.append({
                             "source": "GWAS Catalog",
-                            "variant": f"{row.get('chr_id', '')}:{row.get('chr_pos', '')}",
-                            "rsid": str(row.get('variant_id', '')),
-                            "gene": str(row.get('mapped_gene', 'Unknown')),
-                            "disease": str(row.get('disease_trait', '')),
-                            "clinical_significance": f"p={row.get('p_value', 'N/A')}",
+                            "variant": f"{row.get('CHR_ID', '')}:{row.get('CHR_POS', '')}",
+                            "rsid": str(row.get('SNPS', '')).split(';')[0],
+                            "gene": str(row.get('MAPPED_GENE', 'Unknown')),
+                            "disease": str(row.get('DISEASE/TRAIT', '')),
+                            "clinical_significance": f"p={row.get('P-VALUE', 'N/A')}",
                             "consequence": "",
                             "impact": "GWAS_SIGNAL"
                         })
@@ -291,6 +357,7 @@ async def _get_disease_metadata(disease_name: str) -> Dict[str, Any]:
             return {"found": False, "sources": []}
         
         df = pd.read_csv(disease_path, sep='\t', low_memory=False)
+        df.columns = [c.lstrip('#') for c in df.columns]
         disease_lower = disease_name.lower()
         
         matches = df[df['DiseaseName'].str.lower() == disease_lower]
@@ -326,6 +393,7 @@ async def get_available_diseases(limit: int = 100) -> List[str]:
             return []
         
         df = pd.read_csv(disease_path, sep='\t', low_memory=False)
+        df.columns = [c.lstrip('#') for c in df.columns]
         
         # Filter to only actual diseases (not findings or responses)
         if 'Category' in df.columns:

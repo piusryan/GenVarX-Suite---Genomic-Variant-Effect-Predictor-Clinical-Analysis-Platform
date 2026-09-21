@@ -62,34 +62,82 @@ async def fetch_gwas_associations(rs_id: str, limit: int = 20) -> List[Dict[str,
 
 
 async def _fetch_local_gwas(rs_id: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """Fetch GWAS data from local TSV file."""
+    """
+    Fetch GWAS data from local TSV file.
+    Actual column names in the GWAS Catalog dump:
+      SNPS, DISEASE/TRAIT, P-VALUE, MAPPED_GENE, STUDY, PUBMEDID,
+      STRONGEST SNP-RISK ALLELE, OR or BETA, CHR_ID, CHR_POS
+    Scans entire file via chunked pandas read (no 10K row artificial cap).
+    """
     try:
         gwas_path = "data/datasets/clinvar/gwas-catalog-download-associations-v1.0-full.tsv"
         if not os.path.exists(gwas_path):
             return []
-        
-        df = pd.read_csv(gwas_path, sep='\t', low_memory=False, nrows=10000)
-        
-        # Search for RSID in variant_id column
-        if 'variant_id' not in df.columns:
+
+        test_df = pd.read_csv(gwas_path, sep='\t', low_memory=False, nrows=1)
+        all_cols = list(test_df.columns)
+
+        def pick_col(candidates):
+            for c in candidates:
+                if c in all_cols:
+                    return c
+            return None
+
+        col_snp = pick_col(['SNPS', 'variant_id', 'snp_id', 'SNP_ID_CURRENT'])
+        col_disease = pick_col(['DISEASE/TRAIT', 'disease_trait', 'Disease/Trait'])
+        col_pval = pick_col(['P-VALUE', 'p_value', 'PVALUE'])
+        col_gene = pick_col(['MAPPED_GENE', 'mapped_gene', 'Mapped Gene'])
+        col_study = pick_col(['STUDY', 'study_accession', 'STUDY ACCESSION'])
+        col_pmid = pick_col(['PUBMEDID', 'pubmed_id', 'PUBMED ID'])
+        col_risk = pick_col(['STRONGEST SNP-RISK ALLELE', 'risk_allele', 'RISK ALLELE'])
+        col_or = pick_col(['OR or BETA', 'or_or_beta', 'OR_BETA'])
+
+        if not col_snp:
             return []
-        
-        matches = df[df['variant_id'].astype(str).str.contains(rs_id, na=False, case=False)].head(limit)
-        
-        results = []
-        for _, row in matches.iterrows():
-            results.append({
-                "trait": str(row.get('disease_trait', 'Unknown')),
-                "pvalue": str(row.get('p_value', 'N/A')),
-                "reported_trait": str(row.get('disease_trait', '')),
-                "study_accession": str(row.get('study_accession', '')),
-                "pubmed_id": str(row.get('pubmed_id', '')),
-                "strongest_allele": str(row.get('variant_id', '')),
-                "or_value": str(row.get('or_or_beta', '')),
-                "gene": str(row.get('mapped_gene', ''))
-            })
-        
-        return results
+
+        usecols = [c for c in (col_snp, col_disease, col_pval, col_gene,
+                               col_study, col_pmid, col_risk, col_or) if c]
+
+        rs_lower = rs_id.lower()
+        collected: List[Dict[str, Any]] = []
+        chunksize = 100000
+        for chunk in pd.read_csv(gwas_path, sep='\t', low_memory=False, dtype=str,
+                                 usecols=usecols, chunksize=chunksize):
+            mask = chunk[col_snp].fillna('').astype(str).str.lower().str.contains(rs_lower, regex=False, na=False)
+            matched = chunk[mask].head(max(1, limit - len(collected)))
+            if matched.empty:
+                continue
+            for _, row in matched.iterrows():
+                def getval(col):
+                    if col is None or col not in row.index:
+                        return ''
+                    v = row.get(col)
+                    if pd.isna(v):
+                        return ''
+                    return str(v)
+
+                trait_val = getval(col_disease) or 'Unknown'
+                pval_val = getval(col_pval) or 'N/A'
+                gene_val = getval(col_gene) or ''
+                study_val = getval(col_study) or ''
+                pmid_val = getval(col_pmid) or ''
+                risk_val = getval(col_risk) or ''
+                or_val = getval(col_or) or ''
+
+                collected.append({
+                    "trait": trait_val,
+                    "pvalue": pval_val if pval_val != 'N/A' else None,
+                    "reported_trait": trait_val if trait_val != 'Unknown' else None,
+                    "study_accession": study_val[:60] if study_val else None,
+                    "pubmed_id": pmid_val if pmid_val else None,
+                    "strongest_allele": risk_val if risk_val else None,
+                    "or_value": or_val if or_val else None,
+                    "gene": gene_val if gene_val else None,
+                })
+            if len(collected) >= limit:
+                break
+
+        return collected[:limit]
     except Exception as e:
         print(f"[GWAS] Local TSV search error: {e}")
         return []

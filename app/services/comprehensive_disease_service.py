@@ -97,19 +97,19 @@ async def _ensembl_variation(rsid: str) -> Dict[str, Any]:
 
 
 # ── ClinVar via MyVariant.info ─────────────────────────────────────────
-async def _clinvar_data(variant_input: str) -> Dict[str, Any]:
+async def _clinvar_data(variant_input: str, rsid: Optional[str] = None) -> Dict[str, Any]:
     """
     Fetch clinical significance and associated conditions from
     ClinVar via the MyVariant.info aggregation API.
     """
     try:
-        result = await fetch_clinvar_data(variant_input)
+        result = await fetch_clinvar_data(variant_input, rsid=rsid)
         clin_sig = result.get("clinical_significance", "")
         diseases = result.get("associated_diseases", [])
 
         is_found = clin_sig and "Not Found" not in clin_sig and "Uncertain" not in clin_sig
         disease_entries = [
-            {"disease": d, "clinical_significance": clin_sig, "source": "ClinVar"}
+            {"disease": d, "clinical_significance": clin_sig if is_found else "", "source": "ClinVar"}
             for d in diseases if d and d.strip()
         ]
 
@@ -163,9 +163,12 @@ async def _pubmed_search(gene: str, disease_terms: List[str] = None) -> List[Dic
     if disease_terms:
         first = disease_terms[0]
         if first and len(first) < 50:
-            disease_word = first.split(",")[0].split("/")[0].strip()
+            # Split off pipes/commas/slashes that local VCF entries concatenate, e.g. "A|B|C"
+            candidate = first.split("|")[0].split(",")[0].split("/")[0].strip()
+            if candidate and candidate.lower() not in ("not provided", "not specified"):
+                disease_word = candidate
 
-    query = f"{gene}[Gene] AND {disease_word}[Title/Abstract]"
+    query = f'"{gene}"[Gene] AND "{disease_word}"[Title/Abstract]'
 
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
         try:
@@ -261,78 +264,139 @@ async def _local_clinvar_vcf_search(variant_input: str, is_rsid: bool) -> Dict[s
     """
     Search local ClinVar VCF (4.4M variants) by coordinates or RSID.
     Returns clinical significance, disease names, gene, rsID.
+    IMPORTANT: RS IDs are stored in the INFO field as RS=1234567,
+               the VCF ID column contains ClinVar variation IDs (e.g. 3385321).
     """
     results = []
     rsid_found = None
     clinical_sig = None
     gene_symbol = None
-    
+
     if not os.path.exists(_LOCAL_CLINVAR_VCF):
         return {"hits": [], "rsid": None, "clinical_significance": None, "gene": None, "found": False}
-    
+
     try:
         parts = variant_input.split(':') if not is_rsid else []
         search_chrom = parts[0] if len(parts) >= 2 else None
         search_pos = parts[1] if len(parts) >= 2 else None
-        
+
+        rsid_lower = variant_input.lower() if is_rsid else ''
+        rsid_num = rsid_lower[2:] if rsid_lower.startswith('rs') else rsid_lower
+
+        def clean_name(n):
+            if not n:
+                return None
+            cleaned = n.strip().replace('_', ' ')
+            lower = cleaned.lower()
+            if not cleaned or lower in (
+                'not provided', 'not specified', 'not_provided', 'not_specified',
+                'unknown', '.', 'na', 'n/a'
+            ):
+                return None
+            return cleaned
+
+        def clean_sig(s):
+            return s.strip().replace('_', ' ') if s else ''
+
         with open(_LOCAL_CLINVAR_VCF, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 if line.startswith('#'):
                     continue
-                
                 vparts = line.strip().split('\t')
                 if len(vparts) < 8:
                     continue
-                
+
+                info = vparts[7]
+                info_dict = {}
+                for item in info.split(';'):
+                    if '=' in item:
+                        k, v = item.split('=', 1)
+                        info_dict[k] = v
+
                 matched = False
-                
+                matched_rs = ''
+
                 if is_rsid:
-                    # Match by RSID in the ID column
-                    variant_ids = vparts[2].split(';')
-                    if variant_input.lower() in [vid.lower() for vid in variant_ids]:
-                        matched = True
+                    info_rs = info_dict.get('RS', '')
+                    if info_rs:
+                        for irs in info_rs.split('|'):
+                            if irs == rsid_num or f"rs{irs}" == rsid_lower:
+                                matched = True
+                                matched_rs = f"rs{irs}"
+                                break
+                    if not matched:
+                        id_col = vparts[2]
+                        for vid in id_col.split(';'):
+                            if vid.lower() == rsid_lower:
+                                matched = True
+                                matched_rs = vid if vid.lower().startswith('rs') else ''
+                                break
                 else:
-                    # Match by chromosome + position
                     chrom = vparts[0].replace('chr', '')
                     pos = vparts[1]
                     if chrom == search_chrom and pos == search_pos:
                         matched = True
-                
+                        info_rs = info_dict.get('RS', '')
+                        if info_rs:
+                            first_rs = info_rs.split('|')[0]
+                            matched_rs = f"rs{first_rs}"
+
                 if matched:
-                    info = vparts[7]
-                    info_dict = {}
-                    for item in info.split(';'):
-                        if '=' in item:
-                            k, v = item.split('=', 1)
-                            info_dict[k] = v
-                    
-                    disease = info_dict.get('CLNDN', '')
-                    clin_sig = info_dict.get('CLNSIG', '')
+                    disease_raw = info_dict.get('CLNDN', '')
+                    clin_sig_raw = info_dict.get('CLNSIG', '')
                     gene = info_dict.get('SYMBOL', '')
+                    if not gene:
+                        gi = info_dict.get('GENEINFO', '')
+                        if gi and ':' in gi:
+                            gene = gi.split(':', 1)[0]
                     consequence = info_dict.get('Consequence', '')
                     impact_val = info_dict.get('IMPACT', '')
-                    rsid_val = vparts[2] if vparts[2].startswith('rs') else ''
-                    
-                    if disease and disease != 'not_provided' and disease != 'not_specified':
+                    mc = info_dict.get('MC', '')
+                    if not consequence and mc and '|' in mc:
+                        try:
+                            consequence = mc.split('|', 1)[1].replace('_', ' ')
+                        except Exception:
+                            pass
+
+                    rsid_val = matched_rs
+                    if not rsid_val:
+                        info_rs2 = info_dict.get('RS', '')
+                        if info_rs2:
+                            first_rs2 = info_rs2.split('|')[0]
+                            rsid_val = f"rs{first_rs2}"
+                        else:
+                            for vid in vparts[2].split(';'):
+                                if vid.lower().startswith('rs'):
+                                    rsid_val = vid
+                                    break
+
+                    disease_names = []
+                    if disease_raw:
+                        for raw_d in disease_raw.split('|'):
+                            cd = clean_name(raw_d)
+                            if cd:
+                                disease_names.append(cd)
+
+                    for dname in disease_names:
                         results.append({
-                            "disease": disease.replace('_', ' '),
-                            "clinical_significance": clin_sig.replace('_', ' ') if clin_sig else '',
+                            "disease": dname,
+                            "clinical_significance": clean_sig(clin_sig_raw),
                             "gene": gene,
                             "rsid": rsid_val,
                             "consequence": consequence,
                             "impact": impact_val,
                             "source": "ClinVar VCF (Local)",
                         })
-                    
+
                     if rsid_val and not rsid_found:
                         rsid_found = rsid_val
-                    if clin_sig and not clinical_sig:
-                        clinical_sig = clin_sig.replace('_', ' ')
+                    if clin_sig_raw and not clinical_sig:
+                        clinical_sig = clean_sig(clin_sig_raw)
                     if gene and not gene_symbol:
                         gene_symbol = gene
     except Exception as e:
         print(f"[DISEASE-LOCAL] ClinVar VCF search error: {e}")
-    
+
     return {
         "hits": results[:30],
         "rsid": rsid_found,
@@ -380,6 +444,62 @@ async def _local_gwas_tsv_search(rsid: str) -> Dict[str, Any]:
         return {"hits": [], "found": False}
 
 
+def _coverage_gene_candidates(gene_symbol: str) -> List[str]:
+    """
+    Expand a gene symbol into candidate lookup tokens for HPO/ChEMBL coverage
+    when the exact symbol matches nothing (multi-gene, pseudogene, non-coding
+    composite strings like 'MIR3143 - RPL10P2' or 'GENE - PSEUDOGENE').
+
+    Order of preference:
+      1. the exact symbol as given
+      2. each alphabetic token split on separators ('-', '/', ',', ' ', '|'),
+         with pseudo/mir/snorna markers de-prioritized
+      3. token fragments that match a plain gene-shape (uppercase + digits OK)
+
+    Returns a deduplicated, capped list (max 5) of candidate gene symbols.
+    """
+    import re as _re
+
+    if not gene_symbol:
+        return []
+    raw = str(gene_symbol).strip()
+    if not raw or raw.upper() == "N/A":
+        return []
+
+    candidates: List[str] = []
+    seen = set()
+
+    def _add(tok: str) -> None:
+        t = tok.strip().upper()
+        if t and 2 <= len(t) <= 30 and _re.fullmatch(r"[A-Z0-9._\-]+", t):
+            if t not in seen:
+                seen.add(t)
+                candidates.append(t)
+
+    _add(raw)
+
+    # Split on common separators, keeping only real gene-ish tokens
+    for part in _re.split(r"[;\-,/|]+|\s+", raw):
+        _add(part)
+
+    # Fragments inside tokens (e.g. "(miRNA)", trailing digits) rarely help;
+    # but a token that is a known pseudogene suffix (P1, P2...) whose stem
+    # maps to a real gene can be retried without the suffix.
+    for t in list(candidates):
+        m = _re.fullmatch(r"([A-Z]+[0-9]*)(P[0-9]+L?)?", t.upper())
+        if m and m.group(2):
+            _add(m.group(1))
+
+    # De-prioritize obvious non-coding markers so a coding sibling wins
+    def _rank(tok: str) -> int:
+        if tok.startswith("MIR") or tok.startswith("MIMAT") or tok.startswith("SNORA"):
+            return 2
+        return 0
+
+    candidates.sort(key=_rank)
+    return candidates[:5]
+
+
 async def _local_hpo_search(gene_symbol: str) -> Dict[str, Any]:
     """
     Search local HPO genes_to_phenotype.csv (293K entries) by gene symbol.
@@ -394,7 +514,13 @@ async def _local_hpo_search(gene_symbol: str) -> Dict[str, Any]:
         if 'gene_symbol' not in df.columns:
             return {"phenotypes": [], "found": False}
         
-        matches = df[df['gene_symbol'].str.upper() == gene_symbol.upper()]
+        matches = pd.DataFrame()
+        for cand in _coverage_gene_candidates(gene_symbol):
+            sub = df[df['gene_symbol'].str.upper() == cand]
+            if len(sub) > 0:
+                matches = pd.concat([matches, sub], ignore_index=True)
+                if matches["gene_symbol"].nunique() >= 2:
+                    break
         
         phenotypes = []
         seen = set()
@@ -511,10 +637,15 @@ async def _local_chembl_search(gene_symbol: str) -> Dict[str, Any]:
     try:
         df = pd.read_csv(_LOCAL_CHEMBL_CSV, sep=';', low_memory=False, encoding='utf-8', on_bad_lines='skip')
         
-        # Search in Targets column for gene symbol
+        # Search in Targets column for gene symbol (with coverage-gene fallback
+        # so pseudogene/multi-gene symbols like "MIR3143 - RPL10P2" still match)
         matches = pd.DataFrame()
         if 'Targets' in df.columns:
-            matches = df[df['Targets'].astype(str).str.contains(gene_symbol, na=False, case=False)]
+            for cand in _coverage_gene_candidates(gene_symbol):
+                m = df[df['Targets'].astype(str).str.contains(cand, na=False, case=False)]
+                matches = pd.concat([matches, m], ignore_index=True)
+                if len(m) > 0:
+                    break
         
         results = []
         for _, row in matches.head(10).iterrows():
@@ -580,7 +711,7 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
             print(f"[DISEASE] VEP error: {e}")
 
     # ── Phase 2: Parallel API calls (EXTERNAL + LOCAL) ────────────
-    clinvar_in = variant_input if not is_rsid else f"{variant_input}:N:N:N"
+    clinvar_in = variant_input
     ensembl_rsid = resolved_rsid or (variant_input if is_rsid else None)
     gwas_rsid = resolved_rsid or (variant_input if is_rsid else None)
 
@@ -600,8 +731,10 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
 
     # Only call APIs that have valid input
     tasks = {}
-    if not is_rsid:
-        tasks["clinvar"] = _clinvar_data(variant_input)
+    if resolved_rsid:
+        tasks["clinvar"] = _clinvar_data(clinvar_in, rsid=resolved_rsid)
+    elif not is_rsid:
+        tasks["clinvar"] = _clinvar_data(clinvar_in)
     if ensembl_rsid:
         tasks["ensembl"] = _ensembl_variation(ensembl_rsid)
     if gwas_rsid:
@@ -662,6 +795,15 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # If external GWAS task never ran (Ensembl VEP failed) but local ClinVar
+    # resolved an rsID, query the EBI GWAS Catalog API anyway so known
+    # Pathogenic variants (e.g. BRAF rs113488022) still surface GWAS traits.
+    if resolved_rsid and not gwas_res.get("found"):
+        try:
+            gwas_res = await _gwas_data(resolved_rsid)
+        except Exception as e:
+            print(f"[DISEASE] GWAS fallback error: {e}")
+
     # Resolve gene from Ensembl if VEP didn't provide one
     if (not gene_symbol or gene_symbol == "N/A") and ensembl_res.get("gene"):
         gene_symbol = ensembl_res["gene"]
@@ -719,7 +861,9 @@ async def get_comprehensive_disease(variant_input: str) -> Dict[str, Any]:
     if gene_symbol and gene_symbol != "N/A":
         all_disease_terms = [a.get("disease", "") for a in gwas_res.get("associations", [])[:3]]
         all_disease_terms += [h.get("disease", "") for h in local_gwas.get("hits", [])[:3]]
-        all_disease_terms = [t for t in all_disease_terms if t][:3]
+        all_disease_terms += [d.get("disease", "") for d in clinvar_res.get("diseases", [])[:3]]
+        all_disease_terms += [h.get("disease", "") for h in local_clinvar.get("hits", [])[:3]]
+        all_disease_terms = [t for t in all_disease_terms if t and t.strip()][:3]
         try:
             publications = await _pubmed_search(gene_symbol, all_disease_terms)
         except Exception:

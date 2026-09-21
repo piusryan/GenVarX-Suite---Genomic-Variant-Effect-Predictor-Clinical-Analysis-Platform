@@ -1,4 +1,3 @@
-import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
@@ -8,12 +7,12 @@ from app.services.clinvar_service import fetch_clinvar_data
 from app.services.gwas_service import fetch_gwas_associations
 from app.services.local_gwas_service import search_local_disease_associations, get_dataset_summary
 from app.services.disease_search_service import search_disease_associations, get_available_diseases
-from app.services.chembl_local_service import search_compounds, get_compound
+from app.services.chembl_local_service import search_compounds, get_compound, search_compounds_by_gene
 from app.services.hpo_service import fetch_phenotypes_for_disease
 from app.services.motif_service import analyze_variant_motif_impact
 from app.services.conservation_service import calculate_substitution_cost
-from app.services.rsid_to_disease_service import get_diseases_by_rsid, get_diseases_by_rsids, get_rsid_gene_disease_mapping
-from app.services.comprehensive_disease_service import get_comprehensive_disease
+from app.services.rsid_to_disease_service import get_diseases_by_rsid, get_diseases_by_rsids, get_rsid_gene_disease_mapping, resolve_rsid_to_variant
+from app.services.comprehensive_disease_service import get_comprehensive_disease, _local_clinvar_vcf_search
 
 app = FastAPI(title="GenVarX Engine API", version="1.0.0")
 
@@ -29,64 +28,460 @@ app.add_middleware(
 def health_check():
     return {"status": "online", "service": "GenVarX Engine"}
 
+# ── Shared helper: clinvar_conflicting.csv lookup by coords ──────────
+_CONFLICT_COL_SIFT = "SIFT"
+_CONFLICT_COL_POLYPHEN = "PolyPhen"
+_CONFLICT_COL_AA = "Amino_acids"
+_CONFLICT_COL_SYMBOL = "SYMBOL"
+_CONFLICT_COL_CONS = "Consequence"
+_CONFLICT_COL_IMPACT = "IMPACT"
+_CONFLICT_COL_CLNDN = "CLNDN"
+_CONFLICT_COL_CHROM = "CHROM"
+_CONFLICT_COL_POS = "POS"
+_CONFLICT_COL_REF = "REF"
+_CONFLICT_COL_ALT = "ALT"
+
+
+def _lookup_conflicting_by_coords(chrom_no_prefix: str, pos: str,
+                                   ref: str, alt: str):
+    """Look up clinvar_conflicting.csv by exact CHROM/POS/REF/ALT.
+    Returns dict with {sift, polyphen, amino_acids, gene, consequence,
+    impact, diseases} or None if not found. Uses column names from actual
+    dataset header: CHROM,POS,REF,ALT, ..., SIFT,PolyPhen,Amino_acids,SYMBOL
+    """
+    import os as _os
+    import pandas as _pd
+    _path = "data/datasets/clinvar/clinvar_conflicting.csv"
+    if not _os.path.exists(_path):
+        return None
+    try:
+        chrom_q = str(chrom_no_prefix).replace("chr", "").lower()
+        pos_q = str(pos).strip()
+        ref_q = str(ref).strip().upper()
+        alt_q = str(alt).strip().upper()
+        _cols = [_CONFLICT_COL_CHROM, _CONFLICT_COL_POS, _CONFLICT_COL_REF,
+                 _CONFLICT_COL_ALT, _CONFLICT_COL_SIFT, _CONFLICT_COL_POLYPHEN,
+                 _CONFLICT_COL_AA, _CONFLICT_COL_SYMBOL, _CONFLICT_COL_CONS,
+                 _CONFLICT_COL_IMPACT, _CONFLICT_COL_CLNDN]
+        for _chunk in _pd.read_csv(_path, usecols=_cols, chunksize=30000, low_memory=False):
+            _c = _chunk[_CONFLICT_COL_CHROM].astype(str).str.replace("chr", "").str.lower()
+            _p = _chunk[_CONFLICT_COL_POS].astype(str).str.strip()
+            _r = _chunk[_CONFLICT_COL_REF].astype(str).str.strip().str.upper()
+            _a = _chunk[_CONFLICT_COL_ALT].astype(str).str.strip().str.upper()
+            mask = (_c == chrom_q) & (_p == pos_q) & (_r == ref_q) & (_a == alt_q)
+            hits = _chunk[mask]
+            if len(hits) > 0:
+                row = hits.iloc[0]
+                def _g(col):
+                    v = row.get(col)
+                    if v is None:
+                        return ""
+                    s = str(v).strip()
+                    return "" if s.lower() in ("nan", "none", "n/a") else s
+                sift = _g(_CONFLICT_COL_SIFT)
+                poly = _g(_CONFLICT_COL_POLYPHEN)
+                aa = _g(_CONFLICT_COL_AA)
+                gene = _g(_CONFLICT_COL_SYMBOL)
+                cons = _g(_CONFLICT_COL_CONS)
+                impact = _g(_CONFLICT_COL_IMPACT)
+                cldn_raw = _g(_CONFLICT_COL_CLNDN)
+                diseases = []
+                if cldn_raw:
+                    for raw in cldn_raw.split("|"):
+                        dname = raw.replace("_", " ").strip()
+                        if dname and dname.lower() not in ("not specified", "not_provided", "not provided", "unknown", "nan"):
+                            diseases.append(dname)
+                return {"sift": sift, "polyphen": poly, "amino_acids": aa,
+                        "gene": gene, "consequence": cons, "impact": impact,
+                        "diseases": diseases}
+        return None
+    except Exception:
+        return None
+
+
+def _lookup_conflicting_by_rsid(rsid: str):
+    """Scan clinvar_conflicting.csv for an RSID token inside any string column.
+    RSIDs don't live in a dedicated column here, so we search the whole row.
+    Returns same shape as _lookup_conflicting_by_coords or None."""
+    import os as _os
+    import pandas as _pd
+    _path = "data/datasets/clinvar/clinvar_conflicting.csv"
+    if not _os.path.exists(_path) or not rsid:
+        return None
+    try:
+        rs = str(rsid).strip().lower()
+        for _chunk in _pd.read_csv(_path, chunksize=20000, low_memory=False):
+            found_mask = None
+            for _c in _chunk.columns:
+                if _chunk[_c].dtype == object:
+                    m = _chunk[_c].astype(str).str.lower().str.contains(rs, na=False, regex=False)
+                    found_mask = m if found_mask is None else (found_mask | m)
+            if found_mask is not None and found_mask.any():
+                row = _chunk[found_mask].iloc[0]
+                def _g(col):
+                    if col not in _chunk.columns:
+                        return ""
+                    v = row.get(col)
+                    if v is None:
+                        return ""
+                    s = str(v).strip()
+                    return "" if s.lower() in ("nan", "none", "n/a") else s
+                sift = _g(_CONFLICT_COL_SIFT)
+                poly = _g(_CONFLICT_COL_POLYPHEN)
+                aa = _g(_CONFLICT_COL_AA)
+                gene = _g(_CONFLICT_COL_SYMBOL)
+                cons = _g(_CONFLICT_COL_CONS)
+                impact = _g(_CONFLICT_COL_IMPACT)
+                cldn_raw = _g(_CONFLICT_COL_CLNDN)
+                diseases = []
+                if cldn_raw:
+                    for raw in cldn_raw.split("|"):
+                        dname = raw.replace("_", " ").strip()
+                        if dname and dname.lower() not in ("not specified", "not_provided", "not provided", "unknown", "nan"):
+                            diseases.append(dname)
+                return {"sift": sift, "polyphen": poly, "amino_acids": aa,
+                        "gene": gene, "consequence": cons, "impact": impact,
+                        "diseases": diseases,
+                        "chrom": _g(_CONFLICT_COL_CHROM),
+                        "pos": _g(_CONFLICT_COL_POS),
+                        "ref": _g(_CONFLICT_COL_REF),
+                        "alt": _g(_CONFLICT_COL_ALT)}
+        return None
+    except Exception:
+        return None
+
+
 @app.post("/api/annotate", response_model=VariantAnnotation)
 async def annotate(payload: VariantRequest):
     variant_input = payload.variant.strip()
-    
-    # Check if input is just an RSID (e.g., rs71559014)
+
+    # ──────────────────────────────────────────────────────────────
+    # BRANCH A: Pure RSID input (no colons, starts with rs)
+    # ──────────────────────────────────────────────────────────────
     if variant_input.startswith('rs') and ':' not in variant_input:
-        # It's an RSID - search in GWAS/ClinVar directly
-        rsid_diseases = await get_diseases_by_rsid(variant_input)
-        
-        diseases = [f"{d['disease']} (Gene: {d['gene']})" for d in rsid_diseases.get('diseases', [])[:3]]
-        
-        return VariantAnnotation(
-            variant=variant_input,
-            rs_id=variant_input,
-            gene_symbol="Multiple",
-            consequence="GWAS Variant",
-            sift_prediction="N/A",
-            polyphen_prediction="N/A",
-            amino_acid_change="N/A",
-            impact_level="MODERATE",
-            clinical_significance=diseases[0] if diseases else "Common variant",
-            associated_diseases=diseases
+        # Step A1: resolve RSID → chr:pos:ref:alt + gene via ClinVar VCF
+        resolved = await resolve_rsid_to_variant(variant_input)
+        resolved_gene = (resolved.get("gene_symbol") or "").strip()
+        resolved_variant = resolved.get("variant") or variant_input  # chr:pos:ref:alt or just RSID
+        resolved_sig = (resolved.get("clinical_significance") or "").strip() or None
+        resolved_cons = (resolved.get("consequence") or "").strip() or ""
+        resolved_impact = (resolved.get("impact") or "").strip() or ""
+        resolved_diseases_list = resolved.get("diseases") or []
+
+        # Step A2: get diseases from the RSID mapper (ClinVar VCF + GWAS TSV)
+        rsid_diseases_result = await get_diseases_by_rsid(variant_input)
+        rsid_diseases_raw = rsid_diseases_result.get("diseases", []) or []
+
+        # Step A3: split resolved_variant → coords if we have them, for VEP call
+        has_full_coords = bool(resolved_variant and ':' in resolved_variant
+                               and resolved_variant.count(':') >= 3)
+        coord_chrom = coord_pos = coord_ref = coord_alt = None
+        if has_full_coords:
+            _p = resolved_variant.split(":")
+            coord_chrom = _p[0].replace("chr", "")
+            coord_pos = _p[1] if len(_p) > 1 else None
+            coord_ref = _p[2] if len(_p) > 2 else None
+            coord_alt = _p[3] if len(_p) > 3 else None
+
+        # Step A4: call VEP with the resolved coordinates so we get REAL SIFT/PolyPhen
+        sift_pred = "N/A"
+        polyphen_pred = "N/A"
+        amino_acid = "N/A"
+        vep_gene = None
+        vep_cons = None
+        vep_impact = None
+        vep_sig = None
+        vep_rsid = None
+        vep_diseases = []
+        if has_full_coords:
+            try:
+                vep_result = await fetch_vep_annotation(resolved_variant)
+                vep_gene = getattr(vep_result, "gene_symbol", None)
+                vep_cons = getattr(vep_result, "consequence", None)
+                vep_impact = getattr(vep_result, "impact_level", None)
+                vep_sig = getattr(vep_result, "clinical_significance", None)
+                vep_rsid = getattr(vep_result, "rs_id", None)
+                vep_diseases = getattr(vep_result, "associated_diseases", []) or []
+                # VEP results only count if they look real (not "N/A", not blocking keywords)
+                def _ok(v): return v and isinstance(v, str) and v not in ("N/A", "", None)
+                if _ok(vep_gene):
+                    resolved_gene = vep_gene
+                if _ok(vep_cons) and not any(t in vep_cons for t in ("Unavailable", "Failed", "Invalid", "Timeout")):
+                    resolved_cons = vep_cons
+                if _ok(vep_impact) and vep_impact not in ("UNKNOWN", ""):
+                    resolved_impact = vep_impact
+                if vep_sig and "Not Found" not in str(vep_sig) and "Uncertain" not in str(vep_sig):
+                    resolved_sig = resolved_sig or str(vep_sig).strip()
+                _sv = getattr(vep_result, "sift_prediction", "N/A") or "N/A"
+                _pv = getattr(vep_result, "polyphen_prediction", "N/A") or "N/A"
+                _av = getattr(vep_result, "amino_acid_change", "N/A") or "N/A"
+                if _sv and _sv != "N/A": sift_pred = _sv
+                if _pv and _pv != "N/A": polyphen_pred = _pv
+                if _av and _av != "N/A": amino_acid = _av
+            except Exception:
+                pass
+
+        # Step A5: clinvar_conflicting.csv lookup (by coords first, by RSID string scan as fallback)
+        conflict_hit = None
+        if has_full_coords and coord_chrom and coord_pos and coord_ref and coord_alt:
+            conflict_hit = _lookup_conflicting_by_coords(coord_chrom, coord_pos, coord_ref, coord_alt)
+        if conflict_hit is None:
+            conflict_hit = _lookup_conflicting_by_rsid(variant_input)
+            # If we found it by RSID scan, we now have coords from conflict CSV
+            if conflict_hit and conflict_hit.get("chrom") and conflict_hit.get("pos") and not has_full_coords:
+                coord_chrom = conflict_hit["chrom"]
+                coord_pos = conflict_hit["pos"]
+                coord_ref = conflict_hit.get("ref") or ""
+                coord_alt = conflict_hit.get("alt") or ""
+                if coord_ref and coord_alt:
+                    resolved_variant = f"{coord_chrom}:{coord_pos}:{coord_ref}:{coord_alt}"
+        if conflict_hit is not None:
+            if sift_pred == "N/A" and conflict_hit.get("sift"):
+                sift_pred = conflict_hit["sift"]
+            if polyphen_pred == "N/A" and conflict_hit.get("polyphen"):
+                polyphen_pred = conflict_hit["polyphen"]
+            if amino_acid == "N/A" and conflict_hit.get("amino_acids"):
+                amino_acid = conflict_hit["amino_acids"]
+            if not resolved_gene or resolved_gene in ("N/A", "Unknown", "Multiple") and conflict_hit.get("gene"):
+                resolved_gene = conflict_hit["gene"]
+            if not resolved_cons and conflict_hit.get("consequence"):
+                resolved_cons = conflict_hit["consequence"]
+            if not resolved_impact and conflict_hit.get("impact"):
+                resolved_impact = conflict_hit["impact"]
+            if not resolved_sig and conflict_hit.get("diseases"):
+                resolved_sig = f"Associated with {len(conflict_hit['diseases'])} condition(s)"
+
+        # Step A6: finalise defaults, never show "Multiple" if we can avoid it
+        gene_symbol = (
+            resolved_gene
+            if resolved_gene and resolved_gene not in ("Unknown", "N/A", "", None)
+            else "Multiple"
         )
-    
-    # Otherwise process as full variant
-    vep_task = fetch_vep_annotation(variant_input)
-    clinvar_task = fetch_clinvar_data(variant_input)
+        if not resolved_cons:
+            resolved_cons = "GWAS / Catalog variant"
+        if not resolved_impact:
+            resolved_impact = "MODERATE"
 
-    vep_result, clinvar_result = await asyncio.gather(vep_task, clinvar_task)
+        # Step A7: merge clinical significance from all available sources
+        if not resolved_sig and rsid_diseases_raw:
+            _sigs = set()
+            for _d in rsid_diseases_raw:
+                _s = (_d.get("clinical_significance") or "").strip()
+                if _s and _s.lower() not in ("unknown", ""):
+                    _sigs.add(_s.replace("_", " "))
+            if _sigs:
+                resolved_sig = ", ".join(sorted(_sigs))
 
-    # 1. Check if ClinVar service found a direct match
-    clinvar_sig = clinvar_result.get("clinical_significance", "")
-    clinvar_diseases = clinvar_result.get("associated_diseases", [])
-    
-    is_clinvar_found = clinvar_sig and "Not Found in ClinVar" not in clinvar_sig
+        # Step A8: build merged disease display list
+        _seen_diseases = set()
+        diseases_display = []
+        for _d in rsid_diseases_raw:
+            _txt = f"{_d.get('disease', '')} (Gene: {_d.get('gene', '')})" if _d.get("gene") and _d.get("gene") != "Unknown" else str(_d.get("disease", ""))
+            _key = _txt.lower().strip()
+            if _key and _key not in _seen_diseases:
+                _seen_diseases.add(_key)
+                diseases_display.append(_txt)
+        for _d in resolved_diseases_list:
+            if isinstance(_d, str):
+                _key = _d.lower().strip()
+                if _key and _key not in _seen_diseases:
+                    _seen_diseases.add(_key)
+                    diseases_display.append(_d)
+        if conflict_hit and conflict_hit.get("diseases"):
+            for _d in conflict_hit["diseases"]:
+                _key = _d.lower().strip()
+                if _key and _key not in _seen_diseases:
+                    _seen_diseases.add(_key)
+                    diseases_display.append(_d)
+        for _d in vep_diseases:
+            _s = str(_d)
+            _key = _s.lower().strip()
+            if _key and _key not in _seen_diseases:
+                _seen_diseases.add(_key)
+                diseases_display.append(_s)
 
-    # 2. Smart fallback: Prefer MyVariant -> Fallback to VEP colocated ClinVar -> Default to Not Found
-    final_sig = (
-        clinvar_sig if is_clinvar_found 
-        else getattr(vep_result, "clinical_significance", "Uncertain Significance / Not Found in ClinVar")
-    )
-    
-    final_diseases = (
-        clinvar_diseases if (is_clinvar_found and clinvar_diseases) 
-        else getattr(vep_result, "associated_diseases", [])
-    )
+        if not resolved_sig:
+            resolved_sig = diseases_display[0] if diseases_display else "Common variant (no ClinVar entry)"
+
+        return VariantAnnotation(
+            variant=resolved_variant,
+            rs_id=vep_rsid or variant_input,
+            gene_symbol=gene_symbol,
+            consequence=resolved_cons,
+            sift_prediction=sift_pred,
+            polyphen_prediction=polyphen_pred,
+            amino_acid_change=amino_acid,
+            impact_level=resolved_impact,
+            clinical_significance=resolved_sig,
+            associated_diseases=diseases_display,
+        )
+
+    # ──────────────────────────────────────────────────────────────
+    # BRANCH B: Full coordinate variant input (chr:pos:ref:alt)
+    # ──────────────────────────────────────────────────────────────
+    vep_result = await fetch_vep_annotation(variant_input)
+    clinvar_result = await fetch_clinvar_data(variant_input, rsid=getattr(vep_result, "rs_id", None))
+    local_vcf = await _local_clinvar_vcf_search(variant_input, is_rsid=False)
+
+    # Parse input coords for conflicting CSV lookup
+    _parts = variant_input.replace("chr", "").split(":")
+    _c_chrom = _parts[0] if len(_parts) > 0 else None
+    _c_pos = _parts[1] if len(_parts) > 1 else None
+    _c_ref = _parts[2] if len(_parts) > 2 else None
+    _c_alt = _parts[3] if len(_parts) > 3 else None
+    conflict_hit = None
+    if _c_chrom and _c_pos and _c_ref and _c_alt:
+        conflict_hit = _lookup_conflicting_by_coords(_c_chrom, _c_pos, _c_ref, _c_alt)
+
+    # 0. Local ClinVar VCF data
+    local_diseases = []
+    local_gene = None
+    local_clinsig = None
+    if local_vcf and local_vcf.get("found"):
+        local_gene = local_vcf.get("gene")
+        local_clinsig = local_vcf.get("clinical_significance")
+        for h in local_vcf.get("hits", []) or []:
+            if h.get("disease"):
+                local_diseases.append(h["disease"])
+
+    # Merge in conflicting.csv diseases and gene/significance if missing from VCF
+    conflict_diseases = []
+    conflict_gene = None
+    if conflict_hit:
+        conflict_diseases = conflict_hit.get("diseases") or []
+        conflict_gene = conflict_hit.get("gene") or None
+        if not local_gene and conflict_gene:
+            local_gene = conflict_gene
+
+    # 1. Clinical significance cascade: external ClinVar → local VCF → conflicting → VEP → default
+    clinvar_sig = (clinvar_result.get("clinical_significance") or "").strip()
+    clinvar_diseases = clinvar_result.get("associated_diseases", []) or []
+
+    _BLOCKED_CS = ("", "Not Found in ClinVar", "Uncertain Significance / Not Found in ClinVar",
+                   "Timeout", "Invalid Format", "Lookup Failed", "No Record")
+    merged_sig = ""
+    if clinvar_sig and clinvar_sig not in _BLOCKED_CS and "Not Found" not in clinvar_sig and "Uncertain" not in clinvar_sig:
+        merged_sig = clinvar_sig
+    if not merged_sig and local_clinsig:
+        merged_sig = local_clinsig
+    if not merged_sig:
+        vep_cs = getattr(vep_result, "clinical_significance", None)
+        if vep_cs and vep_cs not in _BLOCKED_CS and "Not Found" not in str(vep_cs) and "Uncertain" not in str(vep_cs):
+            merged_sig = str(vep_cs).strip()
+    # Never let a real ambiguous-looking "Conflicting" cover-row override a clear Pathogenic
+    if "Conflict" in merged_sig and local_clinsig and "Pathogenic" in local_clinsig:
+        merged_sig = local_clinsig
+    final_sig = merged_sig or "Uncertain Significance / Not Found in ClinVar"
+
+    # 1b. Local GWAS Catalog TSV enrichment by resolved coordinate → rsID + pubmed references
+    _gwas_extra_traits = []
+    _gwas_extra_refs = []
+    if variant_input:
+        _gw_rsid = getattr(vep_result, "rs_id", None) or (local_vcf or {}).get("rsid")
+        if not _gw_rsid and conflict_hit:
+            _gw_rsid = conflict_hit.get("rs_id") or conflict_hit.get("rsid")
+        if _gw_rsid:
+            _gw_rows = await _lookup_conflicting_by_rsid(str(_gw_rsid)) if False else None
+            try:
+                from app.services.gwas_service import fetch_gwas_associations as _fga
+                _gwas_rows = await _fga(str(_gw_rsid), limit=12)
+                for _a in _gwas_rows or []:
+                    _tr = str(_a.get("trait") or "").strip()
+                    if _tr and _tr not in _gwas_extra_traits:
+                        _gwas_extra_traits.append(_tr)
+                    _pm = _a.get("pubmed_id") or _a.get("pubmedId") or ""
+                    if _pm and str(_pm).strip() and str(_pm).strip().lower() not in ("nan", "none", "n/a", ""):
+                        _ref = f"PMID:{_pm} {_tr}" if _tr else f"PMID:{_pm}"
+                        if _ref not in _gwas_extra_refs:
+                            _gwas_extra_refs.append(_ref)
+            except Exception:
+                pass
+
+    # 2. Disease merging: LOCAL first — highest priority!
+    _seen_diseases = set()
+    merged_diseases = []
+    for src in (local_diseases, conflict_diseases, clinvar_diseases,
+                getattr(vep_result, "associated_diseases", []) or []):
+        for d in src:
+            s = str(d).replace("_", " ").strip()
+            k = s.lower()
+            if not k or k in _seen_diseases:
+                continue
+            _seen_diseases.add(k)
+            merged_diseases.append(s)
+    for _tr in _gwas_extra_traits:
+        _st = str(_tr).replace("_", " ").strip()
+        _k = _st.lower()
+        if _k and _k not in _seen_diseases:
+            _seen_diseases.add(_k)
+            merged_diseases.append(f"GWAS: {_st}")
+
+    # 3. Gene: VEP → local VCF → conflicting → N/A
+    final_gene = getattr(vep_result, "gene_symbol", None)
+    if not final_gene or final_gene in ("N/A", ""):
+        final_gene = local_gene or "N/A"
+
+    # 4. Consequence: prefer VEP (if usable) → local VCF → conflicting → fallback
+    _vep_cons = str(getattr(vep_result, "consequence", "") or "")
+    _vep_ok = not any(t in _vep_cons for t in ("Unavailable", "Failed", "Invalid", "Timeout", "No VEP Records"))
+    if _vep_ok and _vep_cons:
+        final_consequence = _vep_cons
+    else:
+        final_consequence = ""
+        if local_vcf and local_vcf.get("hits"):
+            for h in local_vcf["hits"]:
+                hc = h.get("consequence", "")
+                if hc:
+                    final_consequence = hc.replace("_", " ")
+                    break
+        if not final_consequence and conflict_hit and conflict_hit.get("consequence"):
+            final_consequence = conflict_hit["consequence"].replace("_", " ")
+        if not final_consequence:
+            if _vep_cons:
+                final_consequence = _vep_cons  # even the failed message is better than nothing
+            elif final_gene != "N/A":
+                final_consequence = "Gene-located variant"
+            else:
+                final_consequence = "Intergenic / not-yet-annotated variant"
+
+    # 5. Impact: VEP → local VCF → conflicting → MODERATE/UNKNOWN
+    final_impact = getattr(vep_result, "impact_level", None)
+    if not final_impact or final_impact in ("UNKNOWN", ""):
+        if local_vcf and local_vcf.get("hits"):
+            for h in local_vcf["hits"]:
+                hi = h.get("impact", "")
+                if hi and hi not in ("UNKNOWN", ""):
+                    final_impact = hi
+                    break
+    if not final_impact or final_impact in ("UNKNOWN", ""):
+        if conflict_hit and conflict_hit.get("impact"):
+            final_impact = conflict_hit["impact"]
+    if not final_impact or final_impact in ("UNKNOWN", ""):
+        final_impact = "MODERATE" if final_gene != "N/A" else "UNKNOWN"
+
+    # 6. Functional predictions: VEP → conflicting → N/A
+    final_sift = getattr(vep_result, "sift_prediction") or "N/A"
+    final_poly = getattr(vep_result, "polyphen_prediction") or "N/A"
+    final_aa = getattr(vep_result, "amino_acid_change") or "N/A"
+    if conflict_hit:
+        if (not final_sift or final_sift == "N/A") and conflict_hit.get("sift"):
+            final_sift = conflict_hit["sift"]
+        if (not final_poly or final_poly == "N/A") and conflict_hit.get("polyphen"):
+            final_poly = conflict_hit["polyphen"]
+        if (not final_aa or final_aa == "N/A") and conflict_hit.get("amino_acids"):
+            final_aa = conflict_hit["amino_acids"]
 
     return VariantAnnotation(
-        variant=vep_result.variant,
-        rs_id=getattr(vep_result, "rs_id", None),
-        gene_symbol=vep_result.gene_symbol,
-        consequence=vep_result.consequence,
-        sift_prediction=vep_result.sift_prediction,
-        polyphen_prediction=vep_result.polyphen_prediction,
-        amino_acid_change=vep_result.amino_acid_change,
-        impact_level=vep_result.impact_level,
+        variant=getattr(vep_result, "variant", variant_input) or variant_input,
+        rs_id=(getattr(vep_result, "rs_id", None) or (local_vcf or {}).get("rsid")),
+        gene_symbol=final_gene,
+        consequence=final_consequence,
+        sift_prediction=final_sift,
+        polyphen_prediction=final_poly,
+        amino_acid_change=final_aa,
+        impact_level=final_impact,
         clinical_significance=final_sig,
-        associated_diseases=final_diseases
+        associated_diseases=merged_diseases,
     )
 
 
@@ -125,26 +520,64 @@ async def gwas_dataset_analysis(payload: VariantRequest):
     """Analyze variant against local datasets and show diagnostic info."""
     import os
     import pandas as pd
-    
-    variant = payload.variant
-    vep_result = await fetch_vep_annotation(variant)
-    rs_id = getattr(vep_result, "rs_id", None)
-    
+
+    raw_input = payload.variant.strip()
+    is_pure_rsid = raw_input.lower().startswith('rs') and ':' not in raw_input
+
+    # Pre-resolve pure RSID input to chr:pos:ref:alt + gene via local files
+    resolved = await resolve_rsid_to_variant(raw_input) if is_pure_rsid else None
+
+    if resolved and resolved.get("variant") and ':' in resolved["variant"] and resolved["variant"].count(':') >= 2:
+        # Have a real chr:pos:ref:alt now; use this for VEP so it won't fail
+        effective_variant = resolved["variant"]
+    else:
+        effective_variant = raw_input
+
+    vep_result = await fetch_vep_annotation(effective_variant)
+    # If VEP failed but we resolved RSID, fill from resolver
+    vep_rs = getattr(vep_result, "rs_id", None)
+    vep_gene = getattr(vep_result, "gene_symbol", None) or "N/A"
+    vep_cons = getattr(vep_result, "consequence", None) or "N/A"
+    vep_clinsig = getattr(vep_result, "clinical_significance", None) or "N/A"
+    vep_assoc = getattr(vep_result, "associated_diseases", None) or []
+
+    if is_pure_rsid and resolved:
+        if not vep_rs:
+            vep_rs = resolved.get("rsid") or raw_input
+        if (not vep_gene) or vep_gene == "N/A" or "Invalid" in str(vep_gene):
+            resolved_gene = resolved.get("gene_symbol")
+            if resolved_gene:
+                vep_gene = resolved_gene
+        if (not vep_cons) or vep_cons == "N/A" or "Failed" in vep_cons or "Invalid" in vep_cons:
+            resolved_cons = resolved.get("consequence") or (
+                f"via {resolved['source']}" if resolved.get('source') else None
+            )
+            if resolved_cons:
+                vep_cons = resolved_cons
+        if (not vep_clinsig) or vep_clinsig == "N/A" or "Invalid" in vep_clinsig:
+            resolved_cs = resolved.get("clinical_significance")
+            if resolved_cs:
+                vep_clinsig = resolved_cs
+        if not vep_assoc and resolved.get("diseases"):
+            vep_assoc = resolved["diseases"]
+
+    rs_id = vep_rs
+
     analysis = {
-        "variant": variant,
+        "variant": raw_input,
         "vep_extraction": {
             "rs_id": rs_id,
-            "gene_symbol": vep_result.gene_symbol,
-            "consequence": vep_result.consequence,
-            "clinical_significance": vep_result.clinical_significance,
-            "associated_diseases": vep_result.associated_diseases,
+            "gene_symbol": vep_gene,
+            "consequence": vep_cons,
+            "clinical_significance": vep_clinsig,
+            "associated_diseases": vep_assoc,
         },
         "local_datasets": {},
         "gwas_catalog_status": None,
         "diagnostic_message": None
     }
-    
-    # Check local GWAS data if any
+
+    # Check local datasets (file listing)
     gwas_dir = "data/datasets"
     if os.path.exists(gwas_dir):
         for subdir in os.listdir(gwas_dir):
@@ -156,7 +589,12 @@ async def gwas_dataset_analysis(payload: VariantRequest):
                     "file_count": len(files),
                     "path": subdir_path
                 }
-    
+
+    # For pure RSID input, fetch GWAS by rs_id directly, even if the VEP resolver
+    # fallback gave an rs_id value we trust it because we already validated it.
+    if is_pure_rsid and not rs_id:
+        rs_id = raw_input
+
     # Check GWAS associations
     if rs_id:
         assoc_rows = await fetch_gwas_associations(rs_id, limit=5)
@@ -170,13 +608,82 @@ async def gwas_dataset_analysis(payload: VariantRequest):
         else:
             analysis["diagnostic_message"] = f"⚠️ rsID {rs_id} exists but has no GWAS associations"
     else:
-        analysis["gwas_catalog_status"] = {
-            "found": False,
-            "count": 0,
-            "associations": []
-        }
-        analysis["diagnostic_message"] = "✗ No rsID found - variant not recognized by VEP/GWAS"
-    
+        # 3b. Coordinate input with NO resolved rsID (VEP/variant-Effects blocked or rare):
+        #      fall back to the LOCAL GWAS Catalog TSV searched by COORDINATES.
+        #      This is fully offline and returns real rows incl. pubmed_id (research ref).
+        coord_hits = []
+        try:
+            from app.services.comprehensive_disease_service import _local_gwas_tsv_search as _lgc
+            _co = _parts
+            _coord_str = (raw_input.replace("chr", "") if (":" in raw_input) else raw_input)
+            if ":" in _coord_str and _coord_str.count(":") >= 1:
+                _fold = []
+                for _seg in _coord_str.split(":")[:2]:
+                    _fold.append(str(_seg).strip())
+                _chrom_q = _fold[0] if len(_fold) > 0 else ""
+                _pos_q = _fold[1] if len(_fold) > 1 else ""
+                _rows = await _lgc(_coord_str)
+                if isinstance(_rows, dict):
+                    _rows = _rows.get("hits", []) or []
+                for _r in _rows or []:
+                    _r2 = dict(_r or {})
+                    _g = _r2.get("chromosome") or _r2.get("chr") or ""
+                    _p = _r2.get("position") or _r2.get("pos") or ""
+                    if str(_g).replace("chr", "") == str(_chrom_q).replace("chr", "") and (
+                        not _pos_q or str(_p) == str(_pos_q) or _pos_q in str(_p)
+                    ):
+                        coord_hits.append(_r2)
+        except Exception as _e:
+            coord_hits = []
+
+        if coord_hits:
+            _seen_t = set()
+            _unique_h = []
+            for _rk in coord_hits:
+                _t = str(_rk.get("trait") or _rk.get("reported_trait") or "GWAS-association for this locus").strip()
+                _t = _t.replace("_", " ").strip()
+                _k = _t.lower()
+                if _k and _k not in _seen_t:
+                    _seen_t.add(_k)
+                    _unique_h.append({
+                        "trait": _t,
+                        "pvalue": _rk.get("pvalue") or _rk.get("p_value") or "",
+                        "pubmed_id": _rk.get("pubmed_id") or _rk.get("pubmedId") or "",
+                        "chromosome": _rk.get("chromosome") or _rk.get("chr") or "",
+                        "position": _rk.get("position") or _rk.get("pos") or "",
+                        "strongest_allele": _rk.get("strongest_allele") or _rk.get("risk_allele") or "",
+                        "gene": _rk.get("gene") or _rk.get("gene_symbol") or "N/A",
+                    })
+            analysis["gwas_catalog_status"] = {
+                "found": True,
+                "count": len(_unique_h),
+                "associations": _unique_h,
+            }
+            analysis["diagnostic_message"] = (
+                f"✓ GWAS Catalog: Found {len(_unique_h)} local association(s) by coordinate "
+                f"(offline local TSV, research/pubmed refs included)"
+            )
+        else:
+            analysis["gwas_catalog_status"] = {
+                "found": False,
+                "count": 0,
+                "associations": [],
+                "note": "Not found in local GWAS Catalog TSV by coordinate — may be rare/familial"
+            }
+            analysis["diagnostic_message"] = (
+                "✗ Coordinate present but no local GWAS Catalog row; "
+                "if this is a rare/familial variant it will not be in the GWAS Catalog"
+            )
+
+    # Step A5: if local ClinVar VCF said Pathogenic etc., never keep showing
+    # the conflicting-CSV's "Conflicting significance" cosmetic over it…
+    if conflict_hit and conflict_hit.get("clinical_significance"):
+        if "Conflict" in str(conflict_hit["clinical_significance"]):
+            if local_clinsig and "Pathogenic" in str(local_clinsig):
+                analysis["datasets"]["clinvar"]["status"] = {
+                    "pathogenic_found": True,
+                    "display": f"✓ {local_clinsig} (local ClinVar VCF confirms; conflicting-CSV matched by position only)"
+                }
     return analysis
 
 
@@ -184,33 +691,90 @@ async def gwas_dataset_analysis(payload: VariantRequest):
 async def disease_associations(payload: VariantRequest):
     """
     Find disease associations from LOCAL datasets.
-    Handles both full variants and RSIDs.
+    Handles both full variants and RSIDs. Robust to VEP failures: resolves
+    the gene from the local ClinVar VCF *first* so HPO / gene-based lookups
+    always run against a real gene when possible.
     """
     variant_input = payload.variant.strip()
-    
-    # Check if input is just an RSID
+
+    # ── Pure RSID input ──
     if variant_input.startswith('rs') and ':' not in variant_input:
         rsid_result = await get_diseases_by_rsid(variant_input)
+        resolved = await resolve_rsid_to_variant(variant_input)
+        resolved_gene = (resolved.get("gene_symbol") or "").strip()
+        gene_symbol = (
+            resolved_gene
+            if resolved_gene and resolved_gene not in ("Unknown", "N/A", "")
+            else "Multiple"
+        )
+        # Also search local datasets using the resolved gene so HPO phenos come back
+        extra_local = await search_local_disease_associations(variant_input, gene_symbol)
+
+        # Pull clinvar_conflicting.csv data too
+        _conflict = _lookup_conflicting_by_rsid(variant_input)
+
         return {
             "variant": variant_input,
             "rsid": variant_input,
-            "gene_symbol": "Multiple",
-            "local_findings": rsid_result,
-            "source": "LOCAL_RSID_MAPPING"
+            "gene_symbol": gene_symbol,
+            "rsid_mapping": rsid_result,
+            "local_findings": extra_local,
+            "clinvar_conflicting": _conflict,
+            "source": "LOCAL_RSID_MAPPING + LOCAL_DATASETS + CLINVAR_CONFLICTING"
         }
-    
-    # Otherwise process as full variant
-    vep_result = await fetch_vep_annotation(variant_input)
-    gene_symbol = vep_result.gene_symbol
-    
-    # Search local datasets
+
+    # ── Coordinate input ──
+    # Step 1: pre-resolve gene/clinvar from LOCAL ClinVar VCF BEFORE VEP call.
+    #         This makes this endpoint 100% usable even if Ensembl is offline.
+    local_vcf = await _local_clinvar_vcf_search(variant_input, is_rsid=False)
+    fallback_gene = None
+    local_extra = {}
+    if local_vcf and local_vcf.get("found"):
+        fallback_gene = local_vcf.get("gene")
+        local_extra = {
+            "clinvar_vcf_direct": {
+                "clinical_significance": local_vcf.get("clinical_significance"),
+                "gene": local_vcf.get("gene"),
+                "rsid": local_vcf.get("rsid"),
+                "hits": local_vcf.get("hits", [])[:15],
+            }
+        }
+
+    # Parse coords for conflicting CSV
+    _parts = variant_input.replace("chr", "").split(":")
+    _conflict = None
+    if len(_parts) >= 4:
+        _conflict = _lookup_conflicting_by_coords(_parts[0], _parts[1], _parts[2], _parts[3])
+    if fallback_gene is None and _conflict and _conflict.get("gene"):
+        fallback_gene = _conflict["gene"]
+
+    # Step 2: try VEP but swallow failures
+    gene_symbol = "N/A"
+    try:
+        vep_result = await fetch_vep_annotation(variant_input)
+        g = getattr(vep_result, "gene_symbol", None)
+        if g and g not in ("N/A", "", None):
+            gene_symbol = g
+    except Exception:
+        gene_symbol = "N/A"
+
+    if not gene_symbol or gene_symbol in ("N/A", "Unknown", ""):
+        gene_symbol = fallback_gene or "N/A"
+
+    # Step 3: local dataset search with the best gene symbol possible
     local_results = await search_local_disease_associations(variant_input, gene_symbol)
-    
+
+    # Merge in direct ClinVar VCF + conflicting findings
+    merged_findings = dict(local_results) if isinstance(local_results, dict) else {"raw": local_results}
+    merged_findings.update(local_extra)
+    if _conflict:
+        merged_findings["clinvar_conflicting_csv"] = _conflict
+
     return {
         "variant": variant_input,
         "gene_symbol": gene_symbol,
-        "local_findings": local_results,
-        "source": "LOCAL_DATASETS"
+        "local_findings": merged_findings,
+        "source": "LOCAL_DATASETS (+ local ClinVar VCF + ClinVar conflicting gene fallback)"
     }
 
 
@@ -270,20 +834,32 @@ async def compounds(query: str = "", limit: int = 20):
         raise HTTPException(status_code=500, detail=str(e))
     out = []
     for r in rows:
-        out.append(
-            CompoundSummary(
-                chembl_id=str(r.get("Compound ChEMBL ID") or ""),
-                name=r.get("Name") or None,
-                compound_type=r.get("Type") or None,
-                max_phase=r.get("Max Phase") or None,
-                molecular_weight=r.get("Molecular Weight") or None,
-                alogp=r.get("AlogP") or None,
-                qed_weighted=r.get("QED Weighted") or None,
-                targets=r.get("Targets") or None,
-                bioactivities=r.get("Bioactivities") or None,
-            )
-        )
+        out.append(_compound_row_to_summary(r))
     return out
+
+
+@app.get("/api/compounds/by-gene/{gene_symbol}", response_model=list[CompoundSummary])
+async def compounds_by_gene(gene_symbol: str, limit: int = 20):
+    """Return ChEMBL compounds whose targets include the given gene symbol."""
+    try:
+        rows = await search_compounds_by_gene(gene_symbol=gene_symbol, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return [_compound_row_to_summary(r) for r in rows]
+
+
+def _compound_row_to_summary(r: dict) -> CompoundSummary:
+    return CompoundSummary(
+        chembl_id=str(r.get("Compound ChEMBL ID") or ""),
+        name=r.get("Name") or None,
+        compound_type=r.get("Type") or None,
+        max_phase=r.get("Max Phase") or None,
+        molecular_weight=r.get("Molecular Weight") or None,
+        alogp=r.get("AlogP") or None,
+        qed_weighted=r.get("QED Weighted") or None,
+        targets=r.get("Targets") or None,
+        bioactivities=r.get("Bioactivities") or None,
+    )
 
 
 @app.get("/api/compounds/{chembl_id}", response_model=CompoundDetail)

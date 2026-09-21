@@ -117,6 +117,23 @@ export const getCompound = async (chemblId) => {
   }
 };
 
+export const getCompoundsByGene = async (geneSymbol, limit = 20) => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/api/compounds/by-gene/${encodeURIComponent(geneSymbol)}`, {
+      params: { limit },
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Gene-targeted compound lookup failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
+
 export const getDiseasesByRsid = async (rsid) => {
   try {
     const response = await axios.get(`${API_BASE_URL}/api/rsid-to-disease/${rsid}`);
@@ -124,6 +141,21 @@ export const getDiseasesByRsid = async (rsid) => {
   } catch (error) {
     if (error.response) {
       throw new Error(error.response.data.detail || 'RSID disease lookup failed.');
+    } else if (error.request) {
+      throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
+    } else {
+      throw new Error('An unexpected error occurred.');
+    }
+  }
+};
+
+export const getDiseasesByRsidsBatch = async (rsids) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/api/rsid-to-disease/batch`, rsids);
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data.detail || 'Batch RSID disease lookup failed.');
     } else if (error.request) {
       throw new Error('Backend server is unreachable. Ensure FastAPI is running on port 8000.');
     } else {
