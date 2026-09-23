@@ -1,0 +1,3 @@
+gwas-catalog-download-associations-v1.0-full.tsv
+
+clinvar.vcf.gz
